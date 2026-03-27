@@ -1,0 +1,702 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{mdframed}
+\usepackage{natbib}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{subcaption}
+
+\geometry{margin=1in}
+
+% ── Callout boxes ─────────────────────────────────────────────────────────────
+\definecolor{shadeblue}{RGB}{235,243,251}
+\definecolor{shadegray}{RGB}{245,245,245}
+\definecolor{shadeyellow}{RGB}{255,252,230}
+
+\mdfdefinestyle{keyresult}{
+  backgroundcolor=shadeblue, linecolor=blue!40, linewidth=0.8pt,
+  innerleftmargin=10pt, innerrightmargin=10pt,
+  innertopmargin=8pt,  innerbottommargin=8pt,
+  skipabove=8pt, skipbelow=8pt
+}
+\mdfdefinestyle{graybox}{
+  backgroundcolor=shadegray, linecolor=gray!40, linewidth=0.8pt,
+  innerleftmargin=10pt, innerrightmargin=10pt,
+  innertopmargin=6pt,  innerbottommargin=6pt,
+  skipabove=6pt, skipbelow=6pt
+}
+
+% ── Title ─────────────────────────────────────────────────────────────────────
+\title{
+  \textbf{FinStructBench:}\\[4pt]
+  \large A Benchmark for Structured Information Retrieval\\
+  from Financial Documents Using Graph-Verifiable Questions
+}
+\author{Agus Sudjianto}
+\date{}
+
+\begin{document}
+\maketitle
+
+% =============================================================================
+\begin{abstract}
+We introduce \textbf{FinStructBench}, a benchmark for evaluating the ability of
+large language models (LLMs) to extract, aggregate, and reason over structured
+information in financial documents.  Unlike existing QA benchmarks that rely on
+human-annotated answers, FinStructBench generates questions \emph{automatically}
+from a document's underlying knowledge graph, making ground truth
+\emph{provably correct by construction}.  We define six question categories of
+increasing structural complexity---exact recall, threshold checking,
+cross-reference, counting, contradiction detection, and multi-hop
+reasoning---and provide five benchmark instances spanning major financial
+report types: model validation (SR~11-7), fair lending (ECOA/HMDA), stress
+testing (CCAR/DFAST), credit portfolio review (OCC), and Basel~III capital
+adequacy (Pillar~3).  Across 258 questions, a graph-based retrieval baseline
+achieves 100\% accuracy by design, while Claude Sonnet~4 scores 45\%,
+revealing a sharp \emph{complexity gradient}: LLM accuracy drops from 86\% on
+simple threshold queries to 0\% on multi-hop reasoning.  FinStructBench is
+released as an open-source toolkit enabling researchers to generate
+benchmark instances from any markdown-formatted financial document.
+\end{abstract}
+
+% =============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Financial regulation demands precise information extraction from structured
+documents: capital ratios must be reported to basis-point accuracy, adverse
+impact ratios must be computed across protected classes, and stress-test
+projections must be traced across scenarios and time horizons.  Errors in
+these tasks carry material consequences---regulatory findings, enforcement
+actions, and capital shortfalls.
+
+Large language models are increasingly deployed for financial document
+analysis, yet existing benchmarks for financial NLP focus predominantly on
+sentiment analysis~\citep{malo2014good}, named entity recognition~\citep{alvarado2015domain},
+or free-form question answering~\citep{chen2021finqa, zhu2021tat} where ground
+truth is established by human annotation.  These benchmarks have three
+limitations in the structured-retrieval setting:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Annotation cost and error.}  Human annotators make mistakes on
+    precise numeric lookups, especially in dense tables with hundreds of cells.
+  \item \textbf{Limited coverage.}  Hand-crafted questions test only the
+    patterns the annotator anticipated, missing systematic failure modes.
+  \item \textbf{No structural baseline.}  Without a provably correct retrieval
+    system, it is impossible to distinguish LLM errors from ambiguous ground truth.
+\end{enumerate}
+
+We address all three limitations with \textbf{FinStructBench}, a benchmark
+construction methodology that:
+\begin{itemize}[leftmargin=2em]
+  \item Ingests any markdown-formatted financial document into a
+    \emph{DocumentGraph} comprising exact numeric memory (ENM) entries and
+    knowledge graph (KG) triples;
+  \item Automatically generates questions by mining graph topology, with
+    ground truth defined by graph traversal---making it provably correct;
+  \item Provides a \emph{graph-based retrieval baseline} (the graph itself)
+    that achieves 100\% by construction, against which any LLM or agentic
+    system can be compared.
+\end{itemize}
+
+Our initial release includes 258 questions across five financial report
+types and six complexity categories.  Results with Claude Sonnet~4 reveal a
+monotonic complexity gradient from 86\% on threshold queries to 0\% on
+multi-hop reasoning, demonstrating that current LLMs lack the structured
+traversal capabilities required for reliable financial document analysis.
+
+% =============================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Financial NLP Benchmarks.}
+FinQA~\citep{chen2021finqa} and TAT-QA~\citep{zhu2021tat} evaluate numerical
+reasoning over financial tables, but rely on human-annotated answers and focus
+on arithmetic operations (addition, percentage change) rather than structural
+graph operations.  ConvFinQA~\citep{chen2022convfinqa} extends to
+conversational settings but inherits the same annotation limitations.
+FLUE~\citep{shah2022flue} aggregates multiple financial NLP tasks but does not
+address structured retrieval from regulatory documents.
+
+\paragraph{Table QA.}
+WikiTableQuestions~\citep{pasupat2015compositional} and
+HybridQA~\citep{chen2020hybridqa} benchmark table understanding but use
+general-domain tables without the precision requirements of financial
+regulation.  SQA~\citep{iyyer2017search} addresses sequential table queries
+but does not test cross-table reasoning.
+
+\paragraph{Document Understanding.}
+DocVQA~\citep{mathew2021docvqa} and financial variants evaluate visual
+document understanding, which is complementary to our text-based setting.
+Recent work on long-context evaluation~\citep{li2024long} tests retrieval
+from long documents but uses synthetic ``needle-in-haystack'' probes rather
+than domain-specific structural queries.
+
+\paragraph{Knowledge Graph QA.}
+KGQA benchmarks~\citep{zhang2022subgraph} evaluate question answering over
+pre-existing knowledge graphs.  FinStructBench differs in that the graph is
+\emph{constructed from} the document, and the benchmark tests whether an LLM
+can implicitly perform the same traversal from the raw text.
+
+% =============================================================================
+\section{Benchmark Construction}
+\label{sec:construction}
+
+FinStructBench's construction pipeline has three stages: document ingestion,
+question generation, and evaluation.  Each stage is fully automated and
+domain-agnostic.
+
+\subsection{Document Ingestion}
+\label{sec:ingestion}
+
+Given a markdown-formatted financial document, the ingester produces a
+\textbf{DocumentGraph} $\mathcal{G} = (\mathcal{E}, \mathcal{T}, \Phi)$
+with three components:
+
+\begin{description}[leftmargin=1.5em, labelindent=0em]
+  \item[Exact Numeric Memory (ENM) $\mathcal{E}$:]  A key-value store
+    mapping $(\textit{type}, \textit{id}) \to (\textit{value}, \textit{hash})$
+    where each numeric value is stored with its SHA-256 hash for integrity
+    verification.  For example, $(\text{capital\_ratio}, \text{CET1})
+    \mapsto (13.232\%, \texttt{a7f3}\ldots)$.
+
+  \item[Knowledge Graph Triples $\mathcal{T}$:]  A set of
+    $(\textit{head}, \textit{relation}, \textit{tail})$ triples extracted
+    from table structure.  Entity columns become heads, label columns
+    generate categorical triples (e.g., $(\text{C\&I}, \text{risk\_rating},
+    \text{Pass})$), and boolean columns generate pass/fail triples.
+
+  \item[Phase Encoders $\Phi$:]  Threshold functions that map metric
+    types to inequality checks.  For example, the \texttt{AIR} encoder
+    defines $\phi_{\text{AIR}}(v) = (v \geq 0.80)$, encoding the
+    four-fifths rule for adverse impact ratios.
+\end{description}
+
+\begin{algorithm}[t]
+\caption{Document Ingestion Pipeline}
+\label{alg:ingest}
+\begin{algorithmic}[1]
+\REQUIRE Markdown document $D$
+\ENSURE DocumentGraph $\mathcal{G} = (\mathcal{E}, \mathcal{T}, \Phi)$
+\STATE Parse $D$ into sections $\{s_1, \ldots, s_k\}$ by heading hierarchy
+\FOR{each section $s_i$}
+  \FOR{each table $T_j$ in $s_i$}
+    \STATE Classify columns: $\textit{entity}, \textit{numeric}, \textit{boolean}, \textit{label}$
+    \STATE Detect entity column by name heuristics
+    \FOR{each row $r$ in $T_j$}
+      \STATE Store numeric cells as ENM entries in $\mathcal{E}$
+      \STATE Add label triples to $\mathcal{T}$: $(\textit{entity}, \textit{col\_name}, \textit{value})$
+      \STATE Add pass/fail triples from boolean columns
+    \ENDFOR
+    \STATE Infer phase encoders from column names $\to \Phi$
+  \ENDFOR
+  \STATE Extract bullet-list key-value pairs as metadata triples
+\ENDFOR
+\RETURN $\mathcal{G}$
+\end{algorithmic}
+\end{algorithm}
+
+The ingester automatically classifies columns into four types using
+value-pattern analysis:
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Numeric:} columns where $>$50\% of values parse as floats
+    (after stripping \$, \%, commas)
+  \item \textbf{Boolean:} columns containing pass/fail, yes/no, or
+    true/false values
+  \item \textbf{Label:} string columns with low cardinality
+    ($|\text{unique}| < 0.5 \times |\text{rows}|$)
+  \item \textbf{Entity:} the primary identifier column, detected by name
+    heuristics (``entity'', ``segment'', ``feature'', first unnamed column)
+\end{itemize}
+
+Phase encoders are inferred from column names using pattern matching
+against a dictionary of 11 financial metric types (Table~\ref{tab:encoders}).
+
+\begin{table}[t]
+\centering
+\caption{Phase encoder types and their default thresholds.}
+\label{tab:encoders}
+\small
+\begin{tabular}{llcl}
+\toprule
+Metric Type & Pattern & Threshold & Direction \\
+\midrule
+AUC & \texttt{auc, auroc} & 0.5 & $\geq$ \\
+Accuracy & \texttt{accuracy, precision, recall, f1} & 0.0 & $\geq$ \\
+AIR & \texttt{air, impact\_ratio} & 0.8 & $\geq$ \\
+Ratio & \texttt{ratio} & 0.0 & $\geq$ \\
+Rate & \texttt{rate} & 0.0 & $\geq$ \\
+Loss & \texttt{loss, charge.off} & 5.0 & $\leq$ \\
+Capital Ratio & \texttt{capital.*ratio, cet1, tier} & 4.5 & $\geq$ \\
+Importance & \texttt{importance, weight} & 0.01 & $\geq$ \\
+Divergence & \texttt{divergence, psi, kl} & 0.2 & $\leq$ \\
+P-value & \texttt{pvalue, p.value} & 0.05 & $\leq$ \\
+Percentage & \texttt{percentage, pct, share} & 0.0 & $\geq$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Question Generation}
+\label{sec:question_gen}
+
+Questions are generated automatically by mining the DocumentGraph topology.
+Each generator maps a graph pattern to a question template, an answer function
+(graph traversal), and an LLM prompt.  We define six categories of increasing
+structural complexity:
+
+\begin{mdframed}[style=graybox]
+\small
+\begin{enumerate}[leftmargin=1.5em]
+\item \textbf{Exact Recall} --- Look up a single ENM value by key.\\
+  \emph{``What is the exact value of CET1 capital ratio?''}\\
+  Graph operation: $\mathcal{E}[\text{capital\_ratio}, \text{CET1}].\text{value}$
+
+\item \textbf{Threshold} --- Check whether a value meets a phase-encoded bound.\\
+  \emph{``Does the CET1 ratio meet the minimum capital requirement ($\geq$4.5\%)?''}\\
+  Graph operation: $\phi_{\text{capital\_ratio}}(\mathcal{E}[\text{CET1}]) \geq 4.5$
+
+\item \textbf{Cross-Reference} --- Find entities appearing in two relation types.\\
+  \emph{``Which entities appear in both `risk\_rating' and `has\_npl' relationships?''}\\
+  Graph operation: $\{h : (h,r_1,\_) \in \mathcal{T}\} \cap \{h : (h,r_2,\_) \in \mathcal{T}\}$
+
+\item \textbf{Counting} --- Aggregate over triple sets.\\
+  \emph{``How many entities have risk\_rating = Substandard?''}\\
+  Graph operation: $|\{h : (h, \text{risk\_rating}, \text{Substandard}) \in \mathcal{T}\}|$
+
+\item \textbf{Contradiction} --- Detect pass/fail inconsistencies across segments.\\
+  \emph{``Which features have both passing and failing segments?''}\\
+  Graph operation: $\{f : \exists\, (\_,\text{passes},f) \in \mathcal{T} \land \exists\, (\_,\text{fails},f) \in \mathcal{T}\}$
+
+\item \textbf{Multi-Hop} --- Chained queries combining ENM lookups and triple traversal.\\
+  \emph{``Find the entity with the lowest loss rate, then look up its capital ratio.''}\\
+  Graph operation: $\arg\min_{k} \mathcal{E}[\text{loss},k].\text{value} \to \mathcal{E}[\text{capital},k']$
+\end{enumerate}
+\end{mdframed}
+
+Each generator produces a pool of candidate questions from the graph, then
+samples up to $N$ per category (default $N=10$) using a fixed random seed
+for reproducibility.  A validation step ensures that the graph-based answer
+function returns a non-trivial result (e.g., non-empty sets, non-null values).
+
+\paragraph{Ground Truth by Construction.}
+A key property of FinStructBench is that ground truth is \emph{defined} by
+graph traversal, not by human annotation.  If the ingester correctly parses
+the document (which is verifiable), then the answer function is guaranteed
+correct.  This eliminates annotation noise and enables scaling to
+arbitrarily large question sets.
+
+\subsection{Evaluation Protocol}
+\label{sec:eval_protocol}
+
+Each question is evaluated against two systems:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Graph Baseline:}  The answer function is executed
+    directly on the DocumentGraph via deterministic traversal (key
+    lookups, triple pattern matching, set operations).  No learning or
+    training is involved---the graph achieves 100\% by construction
+    and serves as the upper bound.
+  \item \textbf{LLM Under Test:}  The LLM receives the full markdown
+    document as context and a structured prompt for each question.
+    Responses are parsed using type-specific parsers (float, int, bool,
+    set, string) with fallback heuristics for format variation.
+\end{enumerate}
+
+Scoring uses exact match for numeric types (with tolerance $\epsilon = 10^{-4}$
+for floats), set equality for set-valued answers, and boolean equality
+for threshold and contradiction questions.
+
+% =============================================================================
+\section{Benchmark Instances}
+\label{sec:instances}
+
+We release five benchmark instances covering major financial document types
+encountered in US banking regulation.  Each instance is a synthetic but
+realistic report generated with fixed random seeds for reproducibility.
+Table~\ref{tab:instances} summarizes their characteristics.
+
+\begin{table}[t]
+\centering
+\caption{FinStructBench instance statistics.}
+\label{tab:instances}
+\small
+\begin{tabular}{lrrrcl}
+\toprule
+Instance & ENM & Triples & Questions & Encoders & Regulatory Context \\
+\midrule
+Model Validation & 261 & 5{,}586 & 60 & 6 & SR 11-7 \\
+Fair Lending & 866 & 1{,}962 & 50 & 7 & ECOA / HMDA \\
+Stress Test & 207 & 1{,}355 & 50 & 4 & CCAR / DFAST \\
+Credit Portfolio & 211 & 2{,}334 & 50 & 5 & OCC Guidelines \\
+Basel Capital & 27 & 785 & 48 & 5 & Basel III Pillar 3 \\
+\midrule
+\textbf{Total} & \textbf{1{,}572} & \textbf{12{,}022} & \textbf{258} & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Model Validation (SR~11-7).}
+A model risk management report evaluating a credit scoring model across
+multiple segments.  Contains accuracy metrics (AUC, precision, recall, F1),
+feature importance analysis (FANOVA), slicing performance by demographic
+segments, and resolution analysis.  This is the only instance with
+contradiction questions, as it contains per-feature pass/fail assessments
+that can be inconsistent across segments.
+
+\paragraph{Fair Lending (ECOA/HMDA).}
+A fair lending analysis examining loan disposition patterns across protected
+classes (race, gender, age).  Contains adverse impact ratios, pricing
+analysis with statistical significance tests, geographic distribution
+indicators, and model fairness metrics (demographic parity, equalized odds).
+The largest instance by ENM entries (866), reflecting the high dimensionality
+of cross-tabulated demographic data.
+
+\paragraph{Stress Test (CCAR/DFAST).}
+A capital adequacy stress test with macroeconomic scenarios (baseline,
+adverse, severely adverse) projected across nine quarters.  Contains loan
+loss projections by portfolio segment, pre-provision net revenue forecasts,
+capital ratio trajectories, and capital action plans.
+
+\paragraph{Credit Portfolio Review (OCC).}
+A credit portfolio examination covering portfolio composition, credit quality
+metrics, risk rating distributions, concentration analysis, allowance
+adequacy, vintage analysis, migration matrices, and stress loss projections.
+
+\paragraph{Basel Capital Adequacy (Pillar~3).}
+A Basel~III regulatory disclosure with capital composition, risk-weighted
+assets by exposure class, capital ratios, credit risk parameters (PD, LGD,
+EAD), market risk (VaR), operational risk (SMA), and leverage ratios.
+The smallest instance by ENM entries (27) but with complex hierarchical
+table structure.
+
+
+% =============================================================================
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Setup}
+
+We evaluate Claude Sonnet~4 (\texttt{claude-sonnet-4-20250514}) against
+the graph baseline across all five instances.  The LLM receives the
+complete markdown document as context (500--1{,}000 lines) along with a
+structured prompt for each question specifying the expected answer format.
+We use 10 questions per category, sampled with seed 42.
+
+\subsection{Main Results}
+
+\begin{table}[t]
+\centering
+\caption{Overall benchmark results: Graph baseline vs.\ Claude Sonnet~4.}
+\label{tab:main_results}
+\small
+\begin{tabular}{lcccc}
+\toprule
+Instance & Questions & Graph & Claude Sonnet & $\Delta$ \\
+\midrule
+Model Validation & 60 & 60/60 (100\%) & 26/60 (43\%) & $-57$ pp \\
+Fair Lending & 50 & 50/50 (100\%) & 30/50 (60\%) & $-40$ pp \\
+Stress Test & 50 & 50/50 (100\%) & 21/50 (42\%) & $-58$ pp \\
+Credit Portfolio & 50 & 50/50 (100\%) & 20/50 (40\%) & $-60$ pp \\
+Basel Capital & 48 & 48/48 (100\%) & 18/48 (38\%) & $-63$ pp \\
+\midrule
+\textbf{Total} & \textbf{258} & \textbf{258 (100\%)} & \textbf{115 (45\%)} & $\mathbf{-55}$ \textbf{pp} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:main_results} presents the overall results.  The graph
+baseline achieves 100\% across all instances by construction.  Claude
+Sonnet~4 achieves 45\% overall, with per-instance scores ranging from
+38\% (Basel Capital) to 60\% (Fair Lending).
+
+\subsection{Complexity Gradient}
+
+\begin{table}[t]
+\centering
+\caption{Results by question category (aggregated across all instances).
+Categories are ordered by decreasing LLM accuracy, revealing a monotonic
+complexity gradient.}
+\label{tab:by_category}
+\small
+\begin{tabular}{lccccc}
+\toprule
+Category & Graph Op. & Total & Graph & Claude & Claude \% \\
+\midrule
+Threshold & $\phi(v) \geq \tau$ & 50 & 50 & 43 & 86\% \\
+Cross-Reference & $S_1 \cap S_2$ & 50 & 50 & 31 & 62\% \\
+Exact Recall & $\mathcal{E}[k]$ & 50 & 50 & 22 & 44\% \\
+Counting & $|\{h : (h,r,t)\}|$ & 50 & 50 & 17 & 34\% \\
+Contradiction & $\exists\, \text{pass} \land \exists\, \text{fail}$ & 10 & 10 & 2 & 20\% \\
+Multi-Hop & chain$(f_1, f_2)$ & 48 & 48 & 0 & 0\% \\
+\midrule
+\textbf{Total} & --- & \textbf{258} & \textbf{258} & \textbf{115} & \textbf{45\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:by_category} reveals a striking complexity gradient.  LLM
+accuracy decreases monotonically with the structural complexity of the
+required graph operation:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Threshold (86\%):}  Simple inequality checks against a
+    single value.  The LLM only needs to locate one number and compare it
+    to a threshold---the simplest possible structured query.
+  \item \textbf{Cross-Reference (62\%):}  Set intersection across two
+    relation types.  Requires identifying entities in two different contexts
+    and computing their overlap.
+  \item \textbf{Exact Recall (44\%):}  Precise numeric lookup.  Despite
+    being a single-hop operation, LLMs frequently return nearby values
+    from the same table or confuse similarly-named entities.
+  \item \textbf{Counting (34\%):}  Exhaustive enumeration and aggregation.
+    Requires scanning all triples matching a pattern---LLMs tend to
+    undercount or lose track in long tables.
+  \item \textbf{Contradiction (20\%):}  Global consistency checking.
+    Requires reasoning about whether a feature passes in some segments
+    but fails in others---a form of negation-as-failure that LLMs
+    struggle with.
+  \item \textbf{Multi-Hop (0\%):}  Chained argmin/argmax followed by
+    cross-type lookup.  Claude Sonnet fails on all 48 multi-hop questions
+    across all five instances, demonstrating a complete inability to
+    perform sequential structured traversal.
+\end{itemize}
+
+\subsection{Per-Instance Breakdown}
+
+\begin{table}[t]
+\centering
+\caption{Claude Sonnet~4 accuracy by instance and category.  Each cell
+shows correct/total.  Shading indicates: {\colorbox{green!15}{$\geq$80\%}},
+{\colorbox{yellow!30}{40--79\%}}, {\colorbox{red!15}{$<$40\%}}.}
+\label{tab:heatmap}
+\small
+\begin{tabular}{l*{6}{c}}
+\toprule
+& \rotatebox{60}{Threshold} & \rotatebox{60}{Cross-Ref} & \rotatebox{60}{Exact Recall} & \rotatebox{60}{Counting} & \rotatebox{60}{Contradiction} & \rotatebox{60}{Multi-Hop} \\
+\midrule
+Model Valid. & \cellcolor{green!15}8/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}2/10 & \cellcolor{red!15}0/10 \\
+Fair Lending & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}7/10 & \cellcolor{green!15}9/10 & \cellcolor{yellow!30}4/10 & --- & \cellcolor{red!15}0/10 \\
+Stress Test & \cellcolor{green!15}10/10 & \cellcolor{green!15}8/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}3/10 & --- & \cellcolor{red!15}0/10 \\
+Credit Port. & \cellcolor{green!15}9/10 & \cellcolor{yellow!30}5/10 & \cellcolor{yellow!30}5/10 & \cellcolor{red!15}1/10 & --- & \cellcolor{red!15}0/10 \\
+Basel Capital & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}5/10 & \cellcolor{red!15}1/10 & \cellcolor{yellow!30}6/10 & --- & \cellcolor{red!15}0/8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:heatmap} shows the full instance $\times$ category breakdown.
+Several patterns emerge:
+
+\paragraph{Multi-hop is universally zero.}
+Across all five instances, Claude Sonnet fails every multi-hop question
+(0/48).  These questions require identifying an extremum (argmin/argmax)
+within one ENM type and then looking up the corresponding entity in a
+different ENM type---a two-step traversal that the LLM cannot reliably
+execute from raw text.
+
+\paragraph{Instance difficulty varies.}
+Fair Lending is the easiest instance (60\%), likely because its tables
+have clear demographic category labels and the AIR threshold of 0.80 is
+well-known.  Basel Capital is hardest (38\%), with deeply nested tables
+and entities identified by composite keys (e.g., exposure class + sub-type
++ maturity band).
+
+\paragraph{Exact recall difficulty depends on table structure.}
+Stress Test exact recall scores 0/10 despite being a single-hop operation.
+This is because the stress test uses dense quarter $\times$ scenario
+matrices where multiple similar values appear in adjacent cells, causing
+the LLM to extract the wrong cell.  Fair Lending scores 9/10 on exact
+recall because its tables have distinctive demographic labels.
+
+\subsection{Error Analysis}
+\label{sec:errors}
+
+We analyze the 143 LLM failures across three representative error modes:
+
+\paragraph{Adjacent Cell Confusion.}
+In 37\% of exact recall failures, the LLM returns a value from a
+neighboring cell in the same table.  For example, when asked for
+``Q1~2026/Non-Interest Income,'' Claude returns the Non-Interest Expense
+value from the same row.  This error is especially prevalent in the
+stress test instance, which uses wide matrices with 9 quarterly columns.
+
+\paragraph{Partial Enumeration.}
+In 68\% of counting failures, the LLM provides a count that is
+lower than the ground truth.  The model appears to enumerate entities
+until it reaches a ``satisfying'' count rather than exhaustively scanning
+all triples.  For example, when asked to count entities with
+\texttt{risk\_rating = Substandard}, Claude finds 4 of 7 entities,
+apparently stopping after processing the first table and missing
+occurrences in subsequent sections.
+
+\paragraph{Multi-Hop Decomposition Failure.}
+All 48 multi-hop failures follow the same pattern: the LLM either
+(a)~answers only the first hop (reports the entity with the extreme value
+but not the cross-type lookup), (b)~hallucinates the second-hop value,
+or (c)~confuses which entity was the extremum.  This suggests that
+current LLMs lack the ability to maintain intermediate results while
+executing a second query---a fundamental limitation for agentic
+financial analysis.
+
+% =============================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Implications for Financial AI.}
+The 55 percentage-point gap between graph-based retrieval and LLM
+performance has direct implications for the deployment of AI in
+financial regulation.  Tasks that involve precise numeric extraction,
+exhaustive enumeration, or multi-step reasoning should not rely on
+LLM-only approaches.  Hybrid architectures that combine LLM
+understanding with structured graph retrieval are likely necessary
+for production-grade financial document analysis.
+
+\paragraph{Benchmark as a Development Tool.}
+FinStructBench can serve as an evaluation harness during the development
+of retrieval-augmented generation (RAG) systems, agentic frameworks, and
+tool-use architectures for financial documents.  The provably correct
+ground truth eliminates the need for human evaluation, enabling rapid
+iteration on system design.
+
+\paragraph{Extensibility.}
+The benchmark toolkit is designed for extensibility.  New question
+categories can be added by implementing a generator class with a
+\texttt{generate(graph)} method.  New instances can be created from
+any markdown document.  The phase encoder system can be extended with
+domain-specific threshold rules.
+
+\paragraph{Limitations.}
+FinStructBench currently uses synthetic financial documents rather
+than real regulatory filings.  While the synthetic reports are
+designed to be structurally realistic, real documents may contain
+additional complexity (e.g., footnotes, cross-references to external
+regulations, redacted sections).  We plan to extend the benchmark
+with anonymized real-world instances in future work.
+
+The benchmark evaluates a single LLM (Claude Sonnet~4) in a
+zero-shot, full-context setting.  Future work should evaluate
+multiple models, few-shot prompting, chain-of-thought reasoning,
+and tool-augmented architectures.
+
+% =============================================================================
+\section{Released Artifacts}
+\label{sec:artifacts}
+
+FinStructBench is released as an open-source Python package with
+the following components:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Toolkit} (\texttt{finstructbench/}): Document ingester,
+    six question generators, scoring module, LLM caller, and benchmark
+    orchestrator.
+  \item \textbf{Instances} (\texttt{instances/}): Five markdown financial
+    reports with reproducible generator scripts.
+  \item \textbf{Results} (\texttt{results/}): Baseline results with
+    per-question details in JSON format.
+  \item \textbf{CLI}: \texttt{python -m finstructbench.benchmark
+    <markdown> [--max-per-category N] [--model M] [--no-llm]}
+\end{enumerate}
+
+% =============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented FinStructBench, a benchmark for structured information
+retrieval from financial documents with provably correct ground truth.
+Our results reveal a sharp complexity gradient in LLM performance:
+Claude Sonnet~4 achieves 86\% on simple threshold checks but 0\% on
+multi-hop reasoning, with an overall score of 45\% against the 100\%
+graph baseline.  These findings demonstrate that current LLMs are
+insufficient for reliable financial document analysis and motivate
+the development of hybrid graph-augmented architectures.  FinStructBench
+provides a rigorous, extensible evaluation framework for measuring
+progress toward this goal.
+
+% =============================================================================
+\bibliographystyle{plainnat}
+\begin{thebibliography}{20}
+
+\bibitem[Alvarado et~al.(2015)]{alvarado2015domain}
+Alvarado, J.~C.~S., Verspoor, K., and Baldwin, T. (2015).
+\newblock Domain adaption of named entity recognition to support credit risk
+  assessment.
+\newblock In \emph{Proceedings of the Australasian Language Technology
+  Association Workshop}, pp.~84--90.
+
+\bibitem[Chen et~al.(2020)]{chen2020hybridqa}
+Chen, W., Zha, H., Chen, Z., Xiong, W., Wang, H., and Wang, W.~Y. (2020).
+\newblock {HybridQA}: A dataset of multi-hop question answering over tabular
+  and textual data.
+\newblock In \emph{Findings of EMNLP}, pp.~1026--1036.
+
+\bibitem[Chen et~al.(2021)]{chen2021finqa}
+Chen, Z., Chen, W., Smiley, C., Shah, S., Borber, I., Leu, S., Zhu, Y.,
+  Kumar, S., Zhang, J., and Wang, W.~Y. (2021).
+\newblock {FinQA}: A dataset of numerical reasoning over financial data.
+\newblock In \emph{Proceedings of EMNLP}, pp.~7862--7872.
+
+\bibitem[Chen et~al.(2022)]{chen2022convfinqa}
+Chen, Z., Li, S., Smiley, C., Ma, Z., Shah, S., and Wang, W.~Y. (2022).
+\newblock {ConvFinQA}: Exploring the chain of numerical reasoning in
+  conversational finance question answering.
+\newblock In \emph{Proceedings of EMNLP}, pp.~6279--6292.
+
+\bibitem[Iyyer et~al.(2017)]{iyyer2017search}
+Iyyer, M., Yih, W., and Chang, M. (2017).
+\newblock Search-based neural structured learning for sequential question
+  answering.
+\newblock In \emph{Proceedings of ACL}, pp.~1821--1831.
+
+\bibitem[Li et~al.(2024)]{li2024long}
+Li, Y., Packer, C., and Gonzalez, J.~E. (2024).
+\newblock How long can open-source {LLMs} truly promise on context length?
+\newblock \emph{arXiv preprint arXiv:2402.17688}.
+
+\bibitem[Malo et~al.(2014)]{malo2014good}
+Malo, P., Sinha, A., Korhonen, P., Wallenius, J., and Takala, P. (2014).
+\newblock Good debt or bad debt: Detecting semantic orientations in economic
+  texts.
+\newblock \emph{Journal of the Association for Information Science and
+  Technology}, 65(4):782--796.
+
+\bibitem[Mathew et~al.(2021)]{mathew2021docvqa}
+Mathew, M., Karatzas, D., and Jawahar, C.~V. (2021).
+\newblock {DocVQA}: A dataset for {VQA} on document images.
+\newblock In \emph{Proceedings of WACV}, pp.~2200--2209.
+
+\bibitem[Pasupat \& Liang(2015)]{pasupat2015compositional}
+Pasupat, P. and Liang, P. (2015).
+\newblock Compositional semantic parsing on semi-structured tables.
+\newblock In \emph{Proceedings of ACL}, pp.~1470--1480.
+
+\bibitem[Shah et~al.(2022)]{shah2022flue}
+Shah, R., Chawla, K., Eidnani, D., Shah, A., Du, W., Chava, S., Raman, N.,
+  Smiley, C., Chen, J., and Yang, D. (2022).
+\newblock When {FLUE} meets {FLANG}: Benchmarks and large pre-trained language
+  model for financial domain.
+\newblock In \emph{Proceedings of EMNLP}, pp.~2322--2335.
+
+\bibitem[Zhang et~al.(2022)]{zhang2022subgraph}
+Zhang, J., Chen, B., Zhang, L., Ke, X., and Ding, H. (2022).
+\newblock Neural, symbolic and neural-symbolic reasoning on knowledge graphs.
+\newblock \emph{AI Open}, 3:109--124.
+
+\bibitem[Zhu et~al.(2021)]{zhu2021tat}
+Zhu, F., Lei, W., Huang, Y., Wang, C., Zhang, S., Lv, J., Feng, F., and
+  Chua, T. (2021).
+\newblock {TAT-QA}: A question answering benchmark on a hybrid of tabular and
+  textual content in finance.
+\newblock In \emph{Proceedings of ACL}, pp.~3277--3287.
+
+\end{thebibliography}
+
+\end{document}

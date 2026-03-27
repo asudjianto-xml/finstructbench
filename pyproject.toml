@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finstructbench"
+version = "0.1.0"
+description = "Benchmark for structured information retrieval from financial documents using graph-verifiable questions"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Agus Sudjianto"},
+]
+keywords = [
+    "benchmark",
+    "finance",
+    "llm",
+    "structured-retrieval",
+    "knowledge-graph",
+    "question-answering",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.30"]
+generate = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10"]
+dev = ["pytest", "pytest-cov"]
+all = ["anthropic>=0.30", "numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "pytest", "pytest-cov"]
+
+[project.scripts]
+finstructbench = "finstructbench.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/asudjianto/finstructbench"
+Documentation = "https://github.com/asudjianto/finstructbench#readme"
+Issues = "https://github.com/asudjianto/finstructbench/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["finstructbench*"]
+
+[tool.setuptools.package-data]
+"finstructbench.instances" = ["*.md"]
+
+[tool.setuptools.exclude-package-data]
+"finstructbench.instances" = ["generate_*.py", "gen_*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
