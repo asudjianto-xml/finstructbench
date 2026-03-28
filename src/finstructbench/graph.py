@@ -40,17 +40,11 @@ class ENMEntry:
 
 
 class PhaseEncoder:
-    """Maps numeric values to angles for inequality queries."""
+    """Threshold checker for a named metric type."""
 
     def __init__(self, v_min: float = 0.0, v_max: float = 1.0):
         self.v_min = v_min
         self.v_max = v_max
-
-    def encode(self, value: float) -> float:
-        """Map value to angle in [0, pi]."""
-        t = (value - self.v_min) / (self.v_max - self.v_min + 1e-12)
-        t = max(0.0, min(1.0, t))
-        return t * np.pi
 
     def check_inequality(self, value: float, limit: float, op: str):
         """Check if value satisfies inequality vs limit.

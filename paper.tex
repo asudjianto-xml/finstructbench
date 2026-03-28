@@ -164,21 +164,40 @@ with three components:
 
 \begin{description}[leftmargin=1.5em, labelindent=0em]
   \item[Exact Numeric Memory (ENM) $\mathcal{E}$:]  A key-value store
-    mapping $(\textit{type}, \textit{id}) \to (\textit{value}, \textit{hash})$
-    where each numeric value is stored with its SHA-256 hash for integrity
-    verification.  For example, $(\text{capital\_ratio}, \text{CET1})
-    \mapsto (13.232\%, \texttt{a7f3}\ldots)$.
+    mapping $(\textit{type}, \textit{id}) \to (\textit{value},
+    \textit{hash})$ where each numeric value is stored with its SHA-256
+    hash for integrity verification.  The \textit{type} is derived from
+    the sanitized section heading (e.g.,
+    \texttt{capital\_adequacy\_ratios}), and the \textit{id} is a
+    composite key encoding the entity, any secondary label columns, and
+    (for multi-column tables) the column name, separated by~\texttt{/}.
+    For example, a stress test table with columns Scenario, Quarter,
+    CET1, and Tier~1 produces keys such as
+    (\texttt{capital\_projections},
+    \texttt{Baseline/Q1\,2026/CET1}),
+    ensuring unambiguous lookup even when the same metric name appears
+    in multiple rows.  Each value is stored alongside its SHA-256 hash
+    (computed over the IEEE-754 double representation) so that any
+    silent corruption is detected at read time.
 
   \item[Knowledge Graph Triples $\mathcal{T}$:]  A set of
     $(\textit{head}, \textit{relation}, \textit{tail})$ triples extracted
-    from table structure.  Entity columns become heads, label columns
-    generate categorical triples (e.g., $(\text{C\&I}, \text{risk\_rating},
-    \text{Pass})$), and boolean columns generate pass/fail triples.
+    from table structure.  For each row the ingester emits:
+    (i)~a \texttt{has\_\textit{col}} triple for every numeric cell,
+    linking the entity to its string-formatted value;
+    (ii)~a categorical triple for every non-entity label column;
+    (iii)~a \texttt{passes} or \texttt{fails} triple if a boolean column
+    is present; and
+    (iv)~an \texttt{in\_section} triple linking the entity to its
+    section tag.
 
-  \item[Phase Encoders $\Phi$:]  Threshold functions that map metric
-    types to inequality checks.  For example, the \texttt{AIR} encoder
-    defines $\phi_{\text{AIR}}(v) = (v \geq 0.80)$, encoding the
-    four-fifths rule for adverse impact ratios.
+  \item[Phase Encoders $\Phi$:]  Inequality functions that map a metric
+    type to a comparison operation.  Each encoder stores the value range
+    $[v_{\min}, v_{\max}]$ observed for that metric (used internally for
+    geometric encoding) and exposes a \texttt{check\_inequality}$(v,
+    \tau, \mathrm{op})$ method supporting $\geq$, $>$, $\leq$, and $<$.
+    Encoders are inferred from column names using regex matching against a
+    dictionary of 11 financial metric types (Table~\ref{tab:encoders}).
 \end{description}
 
 \begin{algorithm}[t]
@@ -187,43 +206,74 @@ with three components:
 \begin{algorithmic}[1]
 \REQUIRE Markdown document $D$
 \ENSURE DocumentGraph $\mathcal{G} = (\mathcal{E}, \mathcal{T}, \Phi)$
-\STATE Parse $D$ into sections $\{s_1, \ldots, s_k\}$ by heading hierarchy
+\STATE Parse $D$ into sections $\{s_1, \ldots, s_k\}$ by \texttt{\#\#}/\texttt{\#\#\#} heading hierarchy
+\STATE Infer phase encoders $\Phi$ from column names across all tables
 \FOR{each section $s_i$}
-  \FOR{each table $T_j$ in $s_i$}
-    \STATE Classify columns: $\textit{entity}, \textit{numeric}, \textit{boolean}, \textit{label}$
-    \STATE Detect entity column by name heuristics
+  \FOR{each markdown table $T_j$ in $s_i$}
+    \STATE Classify columns into \textit{entity}, \textit{numeric}, \textit{boolean}, \textit{label}
+    \STATE Detect entity column by name heuristic; detect boolean column
     \FOR{each row $r$ in $T_j$}
-      \STATE Store numeric cells as ENM entries in $\mathcal{E}$
-      \STATE Add label triples to $\mathcal{T}$: $(\textit{entity}, \textit{col\_name}, \textit{value})$
-      \STATE Add pass/fail triples from boolean columns
+      \STATE $e \gets$ entity value (or subsection name, or \texttt{row\_$i$})
+      \STATE $e_{\text{full}} \gets e\,/\,\text{label}_1\,/\,\ldots\,/\,\text{label}_m$ \hfill\COMMENT{composite ID}
+      \FOR{each numeric column $c$}
+        \STATE $\textit{id} \gets e_{\text{full}}/c$ if multi-column, else $e_{\text{full}}$
+        \STATE $\mathcal{E}[\text{section\_tag}, \textit{id}] \gets (v_c,\; \text{SHA-256}(v_c))$
+        \STATE $\mathcal{T} \gets \mathcal{T} \cup \{(e, \texttt{has\_}c, v_c)\}$
+      \ENDFOR
+      \STATE Add label triples: $(e, \texttt{has\_}\ell, v_\ell)$ for each label column $\ell$
+      \IF{boolean column value $\in$ \{true, yes, weak, fail\}}
+        \STATE $\mathcal{T} \gets \mathcal{T} \cup \{(e_{\text{full}}, \texttt{fails}, \text{tag})\}$
+      \ELSIF{$\in$ \{false, no, strong, pass\}}
+        \STATE $\mathcal{T} \gets \mathcal{T} \cup \{(e_{\text{full}}, \texttt{passes}, \text{tag})\}$
+      \ENDIF
     \ENDFOR
-    \STATE Infer phase encoders from column names $\to \Phi$
   \ENDFOR
-  \STATE Extract bullet-list key-value pairs as metadata triples
+  \STATE Extract bullet-list key-value pairs as metadata ENM entries and triples
 \ENDFOR
 \RETURN $\mathcal{G}$
 \end{algorithmic}
 \end{algorithm}
 
-The ingester automatically classifies columns into four types using
+\paragraph{Column Classification.}
+The ingester classifies each column into one of four types using
 value-pattern analysis:
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{Numeric:} columns where $>$50\% of values parse as floats
-    (after stripping \$, \%, commas)
-  \item \textbf{Boolean:} columns containing pass/fail, yes/no, or
-    true/false values
-  \item \textbf{Label:} string columns with low cardinality
-    ($|\text{unique}| < 0.5 \times |\text{rows}|$)
-  \item \textbf{Entity:} the primary identifier column, detected by name
-    heuristics (``entity'', ``segment'', ``feature'', first unnamed column)
+  \item \textbf{Numeric:} columns where $>$70\% of non-empty values parse
+    as floats (after stripping \$, \%, commas, and parentheses for negative
+    values).
+  \item \textbf{Boolean:} columns where \emph{every} non-empty value is
+    one of: pass, fail, yes, no, true, false, weak, strong
+    (case-insensitive).
+  \item \textbf{Label:} non-numeric, non-boolean string columns.
+  \item \textbf{Entity:} the primary identifier column, selected by name
+    heuristic from a list of 16 common column names (e.g., ``Feature'',
+    ``Segment'', ``Scenario'', ``Product''), falling back to the first
+    label column.
 \end{itemize}
 
-Phase encoders are inferred from column names using pattern matching
-against a dictionary of 11 financial metric types (Table~\ref{tab:encoders}).
+\noindent
+This classification is conservative by design: mixed columns (e.g.,
+\texttt{3.2~(Pass)}) are classified as label rather than boolean or
+numeric, meaning the corresponding pass/fail relationship is not
+captured in the graph.  Questions are generated only from data
+that \emph{is} captured, so coverage may be incomplete but ground
+truth is never wrong.
+
+\paragraph{Phase Encoders.}
+Phase encoders serve two roles: (i)~they define the value range for
+normalizing numeric values to $[0, 1]$, and (ii)~they provide the
+threshold values and comparison operators used by the Threshold
+question generator.
+Table~\ref{tab:encoders} lists the 11 encoder types, their
+column-name patterns, and the default threshold used for question
+generation (not the encoding range).
 
 \begin{table}[t]
 \centering
-\caption{Phase encoder types and their default thresholds.}
+\caption{Phase encoder types: column-name patterns, default question
+thresholds, and comparison direction.  Thresholds are domain-standard
+regulatory or statistical bounds; the Direction column shows whether
+values should be above ($\geq$) or below ($\leq$) the threshold.}
 \label{tab:encoders}
 \small
 \begin{tabular}{llcl}
@@ -231,15 +281,15 @@ against a dictionary of 11 financial metric types (Table~\ref{tab:encoders}).
 Metric Type & Pattern & Threshold & Direction \\
 \midrule
 AUC & \texttt{auc, auroc} & 0.5 & $\geq$ \\
-Accuracy & \texttt{accuracy, precision, recall, f1} & 0.0 & $\geq$ \\
+Accuracy & \texttt{accuracy, precision, recall, f1} & 0.5 & $\geq$ \\
 AIR & \texttt{air, impact\_ratio} & 0.8 & $\geq$ \\
 Ratio & \texttt{ratio} & 0.0 & $\geq$ \\
-Rate & \texttt{rate} & 0.0 & $\geq$ \\
-Loss & \texttt{loss, charge.off} & 5.0 & $\leq$ \\
+Rate & \texttt{rate} & 0.05 & $<$ \\
+Loss & \texttt{loss, charge.off} & 0.5 & $<$ \\
 Capital Ratio & \texttt{capital.*ratio, cet1, tier} & 4.5 & $\geq$ \\
-Importance & \texttt{importance, weight} & 0.01 & $\geq$ \\
-Divergence & \texttt{divergence, psi, kl} & 0.2 & $\leq$ \\
-P-value & \texttt{pvalue, p.value} & 0.05 & $\leq$ \\
+Importance & \texttt{importance, weight} & 0.1 & $\geq$ \\
+Divergence & \texttt{divergence, psi, kl} & 0.3 & $\geq$ \\
+P-value & \texttt{pvalue, p.value} & 0.05 & $<$ \\
 Percentage & \texttt{percentage, pct, share} & 0.0 & $\geq$ \\
 \bottomrule
 \end{tabular}
@@ -250,50 +300,101 @@ Percentage & \texttt{percentage, pct, share} & 0.0 & $\geq$ \\
 \label{sec:question_gen}
 
 Questions are generated automatically by mining the DocumentGraph topology.
-Each generator maps a graph pattern to a question template, an answer function
-(graph traversal), and an LLM prompt.  We define six categories of increasing
-structural complexity:
+Each generator implements a \texttt{generate(graph)} method that returns a
+pool of candidate questions, each comprising: (i)~a natural-language
+question string, (ii)~a deterministic graph-traversal function that
+computes the ground-truth answer, (iii)~a structured LLM prompt with
+format instructions, and (iv)~a typed answer format (float, int, bool,
+set, or string).  We define six categories of increasing structural
+complexity:
 
 \begin{mdframed}[style=graybox]
 \small
 \begin{enumerate}[leftmargin=1.5em]
-\item \textbf{Exact Recall} --- Look up a single ENM value by key.\\
+\item \textbf{Exact Recall} --- Look up a single ENM value by key.
+  Iterates over all ENM entries and generates one question per entry.\\
   \emph{``What is the exact value of CET1 capital ratio?''}\\
-  Graph operation: $\mathcal{E}[\text{capital\_ratio}, \text{CET1}].\text{value}$
+  Graph operation: $\mathcal{E}[\text{capital\_ratio}, \text{CET1}].\text{value}$\\
+  Answer type: \texttt{float}.  LLM is instructed to report the exact value
+  with all decimal places.
 
-\item \textbf{Threshold} --- Check whether a value meets a phase-encoded bound.\\
+\item \textbf{Threshold} --- Check whether a value meets a domain-specific
+  bound.  For each ENM entry, the generator matches its category to a
+  phase encoder via keyword lookup (e.g., a category containing ``capital''
+  maps to the \texttt{capital\_ratio} encoder) and generates a boolean
+  question for each applicable threshold.\\
   \emph{``Does the CET1 ratio meet the minimum capital requirement ($\geq$4.5\%)?''}\\
-  Graph operation: $\phi_{\text{capital\_ratio}}(\mathcal{E}[\text{CET1}]) \geq 4.5$
+  Graph operation: $\phi_{\text{capital\_ratio}}(\mathcal{E}[\text{CET1}]) \geq 4.5$\\
+  Answer type: \texttt{bool}.
 
-\item \textbf{Cross-Reference} --- Find entities appearing in two relation types.\\
-  \emph{``Which entities appear in both `risk\_rating' and `has\_npl' relationships?''}\\
-  Graph operation: $\{h : (h,r_1,\_) \in \mathcal{T}\} \cap \{h : (h,r_2,\_) \in \mathcal{T}\}$
+\item \textbf{Cross-Reference} --- Find entities appearing in two relation
+  types.  Builds an index of relation $\to$ head entities, then generates
+  one question for each pair of relations whose head-entity intersection
+  has between 2 and 50 elements (filtering out trivial or degenerate
+  overlaps).\\
+  \emph{``Which entities appear in both `risk\_rating' and `has\_npl'?''}\\
+  Graph operation: $\{h : (h,r_1,\_) \in \mathcal{T}\} \cap \{h : (h,r_2,\_) \in \mathcal{T}\}$\\
+  Answer type: \texttt{set\_str} (comma-separated list).
 
-\item \textbf{Counting} --- Aggregate over triple sets.\\
+\item \textbf{Counting} --- Aggregate over triple sets.  Three sub-patterns:
+  (a)~count all triples with a given relation,
+  (b)~count entities with a specific (relation, tail) pair, and
+  (c)~count unique head entities per relation.\\
   \emph{``How many entities have risk\_rating = Substandard?''}\\
-  Graph operation: $|\{h : (h, \text{risk\_rating}, \text{Substandard}) \in \mathcal{T}\}|$
+  Graph operation: $|\{h : (h, \text{risk\_rating}, \text{Substandard}) \in \mathcal{T}\}|$\\
+  Answer type: \texttt{int}.
 
-\item \textbf{Contradiction} --- Detect pass/fail inconsistencies across segments.\\
+\item \textbf{Contradiction} --- Detect pass/fail inconsistencies
+  across segments.  Identifies entities that both pass and fail tests
+  within the same feature group (matched by prefix on test-name
+  strings).  Generates three sub-types: (a)~count of contradicting
+  features, (b)~set of contradicting features, and
+  (c)~per-feature boolean questions.  Only applicable to instances
+  with boolean columns (model validation in our release).\\
   \emph{``Which features have both passing and failing segments?''}\\
-  Graph operation: $\{f : \exists\, (\_,\text{passes},f) \in \mathcal{T} \land \exists\, (\_,\text{fails},f) \in \mathcal{T}\}$
+  Graph operation: $\{f : \exists\, (\_,\texttt{passes},f) \in \mathcal{T}$
+  $\land\; \exists\, (\_,\texttt{fails},f) \in \mathcal{T}\}$\\
+  Answer type: \texttt{int}, \texttt{set\_str}, or \texttt{bool}.
 
-\item \textbf{Multi-Hop} --- Chained queries combining ENM lookups and triple traversal.\\
-  \emph{``Find the entity with the lowest loss rate, then look up its capital ratio.''}\\
-  Graph operation: $\arg\min_{k} \mathcal{E}[\text{loss},k].\text{value} \to \mathcal{E}[\text{capital},k']$
+\item \textbf{Multi-Hop} --- Chained queries combining ENM lookups.
+  Two sub-patterns: (a)~\emph{single-type}: find the argmin or argmax
+  entry within one ENM type and report the entity name and value;
+  (b)~\emph{cross-type}: find the argmin/max in type~$t_1$, extract the
+  base entity name (the first component of the composite key before
+  \texttt{/}), then look up all entries for that entity in type~$t_2$.
+  Cross-type questions require at least 3 entries in $t_1$ and 2 in
+  $t_2$, and are only generated when the base-entity match succeeds.\\
+  \emph{``Find the entity with the lowest loss rate, then look up its
+  capital ratio.''}\\
+  Graph operation: $k^* = \arg\min_{k} \mathcal{E}[t_1,k]$;
+  then $\{(k',v) : k' \in \mathcal{E}[t_2]$, $\text{base}(k') = \text{base}(k^*)\}$\\
+  Answer type: \texttt{str} (multi-line formatted).
 \end{enumerate}
 \end{mdframed}
 
-Each generator produces a pool of candidate questions from the graph, then
-samples up to $N$ per category (default $N=10$) using a fixed random seed
-for reproducibility.  A validation step ensures that the graph-based answer
-function returns a non-trivial result (e.g., non-empty sets, non-null values).
+\paragraph{Sampling and Validation.}
+Each generator produces a pool of all structurally valid candidates from
+the graph---the pool sizes range from 8 (multi-hop in Basel Capital,
+which has only 27 ENM entries) to 2{,}443 (cross-reference in Credit
+Portfolio, which has 2{,}334 triples).  From each pool, up to $N$
+questions are sampled uniformly without replacement using a fixed random
+seed (default $N=10$, seed~42) for reproducibility.  Before inclusion,
+every candidate is \emph{validated}: the graph answer function is
+re-executed and its output compared to the stored ground truth.
+Questions where the answer is \texttt{None}, an empty set, or
+inconsistent with the stored ground truth are discarded.  This
+double-check guards against bugs in the answer function and ensures
+that the benchmark is self-consistent.
 
 \paragraph{Ground Truth by Construction.}
 A key property of FinStructBench is that ground truth is \emph{defined} by
-graph traversal, not by human annotation.  If the ingester correctly parses
-the document (which is verifiable), then the answer function is guaranteed
-correct.  This eliminates annotation noise and enables scaling to
-arbitrarily large question sets.
+graph traversal, not by human annotation.  The ingester's correctness
+can be verified independently: we confirm that every stored ENM value
+appears verbatim in the source markdown (1{,}572/1{,}572 entries verified
+across all five instances).  Given correct ingestion, the answer function
+is guaranteed correct by the determinism of key lookup, pattern matching,
+and set operations.  This eliminates annotation noise and enables scaling
+to arbitrarily large question sets.
 
 \subsection{Evaluation Protocol}
 \label{sec:eval_protocol}
@@ -307,14 +408,39 @@ Each question is evaluated against two systems:
     training is involved---the graph achieves 100\% by construction
     and serves as the upper bound.
   \item \textbf{LLM Under Test:}  The LLM receives the full markdown
-    document as context and a structured prompt for each question.
-    Responses are parsed using type-specific parsers (float, int, bool,
-    set, string) with fallback heuristics for format variation.
+    document wrapped in \texttt{<report>} tags as context, along with a
+    system prompt instructing it to answer precisely using only the
+    provided data and to copy numbers exactly as they appear.
+    Each question includes a format instruction specifying the expected
+    answer tag (e.g., \texttt{ANSWER: 13.232}).
 \end{enumerate}
 
-Scoring uses exact match for numeric types (with tolerance $\epsilon = 10^{-4}$
-for floats), set equality for set-valued answers, and boolean equality
-for threshold and contradiction questions.
+\paragraph{Response Parsing.}
+LLM responses are parsed using type-specific parsers with two-stage
+extraction:
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Float:}  First attempts regex on \texttt{ANSWER:\textbackslash s*<number>};
+    falls back to the last float literal in the response.
+  \item \textbf{Int:}  Same two-stage strategy; fallback extracts
+    integers in the range $[1, 999]$.
+  \item \textbf{Bool:}  Matches \texttt{ANSWER:\textbackslash s*(true|false|yes|no)};
+    falls back to keyword detection (\texttt{passes}, \texttt{does not},
+    \texttt{fails}).
+  \item \textbf{Set:}  Splits the \texttt{ANSWER:} line on commas and
+    strips quotes.
+  \item \textbf{String:}  Returns the \texttt{ANSWER:} line verbatim.
+\end{itemize}
+
+\paragraph{Scoring.}
+Scoring uses exact match with the following type-specific rules:
+float answers require $|a - g| < 10^{-6}$;
+integer answers require equality after casting;
+boolean answers require equality;
+set answers require exact set equality (superset answers are also
+accepted);
+string answers require case-insensitive equality.
+Tuple-valued answers (multi-hop) compare element-wise with float
+tolerance $10^{-3}$.
 
 % =============================================================================
 \section{Benchmark Instances}
@@ -322,7 +448,13 @@ for threshold and contradiction questions.
 
 We release five benchmark instances covering major financial document types
 encountered in US banking regulation.  Each instance is a synthetic but
-realistic report generated with fixed random seeds for reproducibility.
+structurally realistic report: we first defined the table schemas, section
+structure, and entity names to mirror actual regulatory filings, then
+populated numeric cells with randomly generated values drawn from
+domain-appropriate distributions (e.g., capital ratios from
+$\mathcal{N}(12, 3)$ clipped to $[4, 25]$, approval rates from
+$\text{Beta}(5, 2)$).  All instances are generated with fixed random
+seeds for reproducibility.
 Table~\ref{tab:instances} summarizes their characteristics.
 
 \begin{table}[t]
@@ -602,8 +734,8 @@ the following components:
     reports with reproducible generator scripts.
   \item \textbf{Results} (\texttt{results/}): Baseline results with
     per-question details in JSON format.
-  \item \textbf{CLI}: \texttt{python -m finstructbench.benchmark
-    <markdown> [--max-per-category N] [--model M] [--no-llm]}
+  \item \textbf{CLI}: \texttt{python -m finstructbench run <doc.md>}
+    with options for category limit, model, and graph-only mode.
 \end{enumerate}
 
 % =============================================================================
