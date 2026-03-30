@@ -1,34 +1,10 @@
 """Counting — aggregation over triple sets and ENM entries."""
 
-import random
-
 from finstructbench.generators.base import QuestionGenerator, GeneratedQuestion, ANSWER_FORMATS
 
 
 class CountingGenerator(QuestionGenerator):
     category = "counting"
-
-    def sample(self, candidates: list[GeneratedQuestion],
-               max_questions: int, seed: int = 42) -> list[GeneratedQuestion]:
-        """Prioritize column-based counting questions.
-
-        Column-based questions (with 'column' in metadata) match
-        KG enrichment counts. Fill remaining slots with other types.
-        """
-        col_based = [q for q in candidates if q.metadata.get("column")]
-        others = [q for q in candidates if not q.metadata.get("column")]
-        rng = random.Random(seed)
-
-        selected: list[GeneratedQuestion] = []
-        if len(col_based) <= max_questions:
-            selected.extend(col_based)
-        else:
-            selected.extend(rng.sample(col_based, max_questions))
-
-        remaining = max_questions - len(selected)
-        if remaining > 0 and others:
-            selected.extend(rng.sample(others, min(remaining, len(others))))
-        return selected
 
     def generate(self, graph) -> list[GeneratedQuestion]:
         questions = []
