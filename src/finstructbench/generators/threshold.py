@@ -52,6 +52,7 @@ class ThresholdGenerator(QuestionGenerator):
 
         for key, entry in list(graph.enm.items()):
             cat, eid = key.type, key.id
+            meta = graph.enm_meta.get(key, {})
             value = entry.value
             encoder_name = _match_encoder(cat, eid)
 
@@ -91,7 +92,16 @@ class ThresholdGenerator(QuestionGenerator):
                         f"{ANSWER_FORMATS['bool']}"
                     ),
                     answer_type="bool",
-                    metadata={"encoder": encoder_name, "threshold": thresh, "op": op},
+                    metadata={
+                        "encoder": encoder_name,
+                        "threshold": thresh,
+                        "op": op,
+                        "column": meta.get("column", ""),
+                        "entity": meta.get("entity", eid),
+                        "value": value,
+                        "enm_type": cat,
+                        "enm_id": eid,
+                    },
                 )
 
                 if self._validate(graph, q):

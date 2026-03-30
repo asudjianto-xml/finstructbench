@@ -182,7 +182,20 @@ def detect_entity_column(rows: list[dict], col_types: dict) -> str | None:
             return col
 
     # First label column
-    return label_cols[0] if label_cols else None
+    if label_cols:
+        return label_cols[0]
+
+    # Check _index column (unnamed first column with non-numeric values)
+    if rows and "_index" in rows[0]:
+        index_values = [r.get("_index", "").strip() for r in rows]
+        non_empty = [v for v in index_values if v]
+        if non_empty:
+            # Only use _index if values are NOT all numeric (avoid row indices)
+            numeric_count = sum(1 for v in non_empty if try_float(v) is not None)
+            if numeric_count / len(non_empty) <= 0.5:
+                return "_index"
+
+    return None
 
 
 def detect_pass_fail_column(rows: list[dict], col_types: dict) -> str | None:
@@ -249,6 +262,9 @@ def ingest_table(graph: DocumentGraph, section_name: str, subsection: str | None
         sub_tag = re.sub(r"[^a-zA-Z0-9_\s]", "", subsection).strip()
         sub_tag = sub_tag.replace(" ", "_").lower()
 
+    # Clean section name for entity fallback (matches table extractor behavior)
+    section_entity = re.sub(r"^\d+\.\s*", "", section_name).strip()
+
     for i, row in enumerate(rows):
         # Determine entity name
         if entity_col and row.get(entity_col, "").strip():
@@ -256,7 +272,7 @@ def ingest_table(graph: DocumentGraph, section_name: str, subsection: str | None
         elif subsection:
             entity = subsection
         else:
-            entity = f"row_{i}"
+            entity = section_entity if section_entity else f"row_{i}"
 
         # Build composite entity ID for non-unique entities
         secondary_labels = []
@@ -276,7 +292,10 @@ def ingest_table(graph: DocumentGraph, section_name: str, subsection: str | None
             if val is not None:
                 # ENM category = section_tag, entity_id = entity/column
                 enm_id = f"{entity_full}/{col}" if len(numeric_cols) > 1 else entity_full
-                graph.store_value(section_tag, enm_id, val)
+                graph.store_value(
+                    section_tag, enm_id, val,
+                    column=col, entity=entity,
+                )
 
                 # Triple: entity has_<column> value
                 rel = f"has_{col.replace(' ', '_').lower()}"

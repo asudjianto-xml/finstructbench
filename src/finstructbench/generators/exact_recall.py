@@ -12,6 +12,9 @@ class ExactRecallGenerator(QuestionGenerator):
 
         for key, entry in list(graph.enm.items()):
             cat, eid = key.type, key.id
+            meta = graph.enm_meta.get(key, {})
+            col = meta.get("column", "")
+            entity = meta.get("entity", eid)
 
             def make_fn(c, e):
                 def fn(g):
@@ -31,7 +34,12 @@ class ExactRecallGenerator(QuestionGenerator):
                     f"{ANSWER_FORMATS['float']}"
                 ),
                 answer_type="float",
-                metadata={"enm_type": cat, "enm_id": eid},
+                metadata={
+                    "enm_type": cat,
+                    "enm_id": eid,
+                    "column": col,
+                    "entity": entity,
+                },
             )
 
             if self._validate(graph, q):
