@@ -36,12 +36,14 @@ dependencies = [
 
 [project.optional-dependencies]
 llm = ["anthropic>=0.30"]
+mcp = ["mcp[cli]>=1.0"]
 generate = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10"]
 dev = ["pytest", "pytest-cov"]
-all = ["anthropic>=0.30", "numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "pytest", "pytest-cov"]
+all = ["anthropic>=0.30", "mcp[cli]>=1.0", "numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "pytest", "pytest-cov"]
 
 [project.scripts]
 finstructbench = "finstructbench.cli:main"
+finstructbench-mcp = "finstructbench.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/asudjianto/finstructbench"
