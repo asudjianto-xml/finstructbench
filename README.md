@@ -104,6 +104,79 @@ bench.print_results(result)
 2. **Generate**: Mine graph topology → questions with provably correct answers
 3. **Evaluate**: Graph baseline (100% by construction) vs. LLM under test
 
+## MCP Server (Claude Integration)
+
+FinStructBench includes an MCP server that exposes graph operations as tools, enabling Claude to perform **deterministic graph traversal** instead of extracting structured data from raw text. This directly addresses the 0% multi-hop accuracy by letting Claude call tools for each hop.
+
+### Installation
+
+```bash
+pip install finstructbench[mcp]
+```
+
+### Running the Server
+
+```bash
+# stdio transport (for Claude Code / desktop)
+python -m finstructbench.mcp_server
+
+# SSE transport (for web clients)
+python -m finstructbench.mcp_server --transport sse
+
+# Or via entry point
+finstructbench-mcp
+```
+
+### Claude Code Configuration
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "finstructbench": {
+      "command": "python",
+      "args": ["-m", "finstructbench.mcp_server"]
+    }
+  }
+}
+```
+
+### Available Tools
+
+**Category-specific** (one per question type):
+
+| Tool | Category | What it does |
+|---|---|---|
+| `exact_recall` | Exact Recall | Look up a single ENM value by key |
+| `threshold_check` | Threshold | Check if a value meets a bound |
+| `cross_reference` | Cross-Reference | Find entities in two relation types |
+| `count_entities` | Counting | Count triples matching a pattern |
+| `find_contradictions` | Contradiction | Detect pass/fail inconsistencies |
+| `multi_hop_chain` | Multi-Hop | Chained argmin/max + cross-type lookup |
+| `multi_hop_argminmax` | Multi-Hop (hop 1) | Find extremum within one ENM type |
+
+**Low-level primitives:**
+
+| Tool | What it does |
+|---|---|
+| `query_enm` | Direct ENM key-value lookup with filtering |
+| `query_triples` | Pattern-match KG triples (head/relation/tail) |
+
+**Discovery & management:**
+
+| Tool | What it does |
+|---|---|
+| `list_documents` | Show available document instances |
+| `load_document` | Ingest a custom markdown file |
+| `list_enm_types` | Browse ENM categories with counts |
+| `list_relations` | Browse KG relation types with counts |
+| `graph_stats` | Full graph overview |
+
+### Skill File
+
+`SKILL.md` provides Claude with conventions for classifying questions into the six categories, discovering document schema, and composing tool calls. Place it in your project root or reference it in your Claude Code configuration.
+
 ## Extending
 
 ### Add a question generator
@@ -135,7 +208,7 @@ finstructbench run my_report.md --no-llm  # Verify graph baseline
 @article{sudjianto2026finstructbench,
   title={FinStructBench: A Benchmark for Structured Information Retrieval
          from Financial Documents Using Graph-Verifiable Questions},
-  author={Sudjianto, Agus},
+  author={Sudjianto, Agus and Lau, Wingyan},
   year={2026}
 }
 ```
