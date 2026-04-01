@@ -45,6 +45,8 @@ def parse_md_table(text: str) -> list[dict]:
             cells = cells[1:]
         if cells and cells[-1] == "":
             cells = cells[:-1]
+        # Strip markdown bold (**...**) from cell values
+        cells = [re.sub(r'\*\*(.+?)\*\*', r'\1', c).strip() for c in cells]
         return cells
 
     headers = split_row(header_line)
@@ -118,7 +120,7 @@ def parse_bullet_kvs(text: str) -> dict[str, str]:
 
 
 def try_float(s: str) -> float | None:
-    """Try to parse a string as float."""
+    """Try to parse a string as float (plain numbers only)."""
     if not s or s.strip().lower() in ("nan", "", "-"):
         return None
     try:
@@ -127,9 +129,85 @@ def try_float(s: str) -> float | None:
         return None
 
 
+def parse_financial_number(s: str) -> float | None:
+    """Parse a financial-formatted number: $, %, commas, parenthetical negatives.
+
+    Examples:
+        "$1,250,000,000" -> 1250000000.0
+        "13.2320%"       -> 13.232
+        "$(187,345,672)" -> -187345672.0
+        "+523.20"        -> 523.2
+        "85%"            -> 85.0
+        "N/A"            -> None
+    """
+    if not s:
+        return None
+    s = s.strip()
+    if not s or s.lower() in ("nan", "", "-", "n/a", "—", "–"):
+        return None
+
+    # Try plain float first (fast path)
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        pass
+
+    # Detect parenthetical negatives: $(123) or (123)
+    negative = False
+    if s.startswith("(") and s.endswith(")"):
+        negative = True
+        s = s[1:-1].strip()
+    elif s.startswith("$(") and s.endswith(")"):
+        negative = True
+        s = s[2:-1].strip()
+
+    # Strip currency symbols and whitespace
+    s = s.replace("$", "").replace("€", "").replace("£", "").strip()
+
+    # Strip percentage sign
+    s = s.rstrip("%").strip()
+
+    # Strip commas (thousand separators)
+    s = s.replace(",", "")
+
+    # Strip trailing multiplier 'x' (e.g., "1.06x")
+    if s.endswith("x") and len(s) > 1:
+        s = s[:-1].strip()
+
+    # Strip parenthetical annotations (e.g., "3.2 (Pass)")
+    paren_match = re.match(r'^([0-9.+\-]+)\s*\(.*\)\s*$', s)
+    if paren_match:
+        s = paren_match.group(1)
+
+    # Strip leading +
+    if s.startswith("+"):
+        s = s[1:]
+
+    if not s:
+        return None
+
+    try:
+        val = float(s)
+        return -val if negative else val
+    except (ValueError, TypeError):
+        return None
+
+
 # ============================================================================
 # COLUMN TYPE DETECTION
 # ============================================================================
+
+def _looks_like_year_column(col_name: str, values: list[str]) -> bool:
+    """Check if a column contains year-like values (e.g., 2019, 2020)."""
+    if not values:
+        return False
+    year_kw = {"year", "vintage", "period", "quarter"}
+    if any(kw in col_name.lower() for kw in year_kw):
+        year_count = sum(1 for v in values if re.match(r'^(19|20)\d{2}$', v.strip()))
+        if year_count / len(values) > 0.5:
+            return True
+    return False
+
 
 def classify_columns(rows: list[dict]) -> dict[str, str]:
     """Classify each column as: numeric, boolean, label, or entity.
@@ -157,8 +235,13 @@ def classify_columns(rows: list[dict]) -> dict[str, str]:
             col_types[col] = "boolean"
             continue
 
-        # Check numeric
-        numeric_count = sum(1 for v in non_empty if try_float(v) is not None)
+        # Year columns (e.g., "Vintage: 2019, 2020") should be labels, not numeric
+        if _looks_like_year_column(col, non_empty):
+            col_types[col] = "label"
+            continue
+
+        # Check numeric (use financial parser to handle $, %, commas)
+        numeric_count = sum(1 for v in non_empty if parse_financial_number(v) is not None)
         if numeric_count / len(non_empty) > 0.7:
             col_types[col] = "numeric"
             continue
@@ -182,7 +265,19 @@ def detect_entity_column(rows: list[dict], col_types: dict) -> str | None:
             return col
 
     # First label column
-    return label_cols[0] if label_cols else None
+    if label_cols:
+        return label_cols[0]
+
+    # Check _index column (unnamed first column with non-numeric values)
+    if rows and "_index" in rows[0]:
+        index_values = [r.get("_index", "").strip() for r in rows]
+        non_empty = [v for v in index_values if v]
+        if non_empty:
+            numeric_count = sum(1 for v in non_empty if try_float(v) is not None)
+            if numeric_count / len(non_empty) <= 0.5:
+                return "_index"
+
+    return None
 
 
 def detect_pass_fail_column(rows: list[dict], col_types: dict) -> str | None:
@@ -253,6 +348,9 @@ def ingest_table(graph: DocumentGraph, section_name: str, subsection: str | None
         # Determine entity name
         if entity_col and row.get(entity_col, "").strip():
             entity = row[entity_col].strip()
+        elif "_index" in row and row["_index"].strip() and try_float(row["_index"]) is None:
+            # Use _index only if it's a meaningful label (not a bare number)
+            entity = row["_index"].strip()
         elif subsection:
             entity = subsection
         else:
@@ -272,11 +370,14 @@ def ingest_table(graph: DocumentGraph, section_name: str, subsection: str | None
 
         # Store numeric values as ENM entries
         for col in numeric_cols:
-            val = try_float(row.get(col, ""))
+            val = parse_financial_number(row.get(col, ""))
             if val is not None:
                 # ENM category = section_tag, entity_id = entity/column
                 enm_id = f"{entity_full}/{col}" if len(numeric_cols) > 1 else entity_full
-                graph.store_value(section_tag, enm_id, val)
+                graph.store_value(
+                    section_tag, enm_id, val,
+                    column=col, entity=entity,
+                )
 
                 # Triple: entity has_<column> value
                 rel = f"has_{col.replace(' ', '_').lower()}"
@@ -319,16 +420,43 @@ def ingest_bullets(graph: DocumentGraph, section_name: str, kvs: dict[str, str])
             graph.add_triple(section_tag, f"has_{key.replace(' ', '_').lower()}", value)
 
 
-def ingest_markdown(path: str, document_entity: str | None = None) -> DocumentGraph:
+def _find_table_blocks(content: str) -> list[str]:
+    """Extract contiguous blocks of markdown table lines from section content."""
+    table_blocks = []
+    current_block = []
+    for line in content.split("\n"):
+        if line.strip().startswith("|"):
+            current_block.append(line)
+        else:
+            if current_block:
+                table_blocks.append("\n".join(current_block))
+                current_block = []
+    if current_block:
+        table_blocks.append("\n".join(current_block))
+    return table_blocks
+
+
+def ingest_markdown(path: str, document_entity: str | None = None,
+                    mode: str = "default", llm_client=None,
+                    llm_model: str = "claude-sonnet-4-20250514") -> DocumentGraph:
     """Ingest any markdown document into a DocumentGraph.
 
     Args:
         path: Path to markdown file.
         document_entity: Optional name for the document root entity.
+        mode: Ingestion mode — "default" (rule-based) or "hybrid" (LLM-assisted).
+        llm_client: Anthropic client (required for hybrid mode).
+        llm_model: Model ID for LLM calls in hybrid mode.
 
     Returns:
         Populated DocumentGraph ready for benchmark generation.
     """
+    if mode not in ("default", "hybrid", "llm_only"):
+        raise ValueError(f"Unknown ingest mode: {mode!r}. Use 'default', 'hybrid', or 'llm_only'.")
+    if mode in ("hybrid", "llm_only") and llm_client is None:
+        raise ValueError(f"{mode} mode requires an LLM client. "
+                         "Pass llm_client=create_client().")
+
     with open(path) as f:
         text = f.read()
 
@@ -341,11 +469,22 @@ def ingest_markdown(path: str, document_entity: str | None = None) -> DocumentGr
         graph.metadata["title"] = title_match.group(1).strip()
     if document_entity:
         graph.metadata["document_entity"] = document_entity
+    graph.metadata["ingest_mode"] = mode
 
     # Infer and register phase encoders
     encoder_ranges = infer_phase_encoders(sections)
     for name, (vmin, vmax) in encoder_ranges.items():
         graph.add_phase_encoder(name, vmin, vmax)
+
+    # Lazy import for LLM modes
+    if mode in ("hybrid", "llm_only"):
+        from finstructbench.llm_ingest import (
+            llm_classify_columns,
+            llm_detect_entity_column,
+            llm_extract_relations,
+            llm_extract_table,
+            llm_extract_bullets_and_prose,
+        )
 
     # Process each section
     for section_key, content in sections.items():
@@ -354,28 +493,101 @@ def ingest_markdown(path: str, document_entity: str | None = None) -> DocumentGr
         subsection = parts[1] if len(parts) > 1 else None
 
         # Ingest tables
-        # Find table blocks in content (lines starting with |)
-        table_blocks = []
-        current_block = []
-        for line in content.split("\n"):
-            if line.strip().startswith("|"):
-                current_block.append(line)
-            else:
-                if current_block:
-                    table_blocks.append("\n".join(current_block))
-                    current_block = []
-        if current_block:
-            table_blocks.append("\n".join(current_block))
+        table_blocks = _find_table_blocks(content)
 
         for table_text in table_blocks:
             rows = parse_md_table(table_text)
-            if rows:
+            if not rows:
+                continue
+
+            if mode == "llm_only":
+                # LLM extracts everything from the table
+                extracted = llm_extract_table(
+                    llm_client, section_name, subsection,
+                    table_text, llm_model)
+
+                for entry in extracted.get("enm", []):
+                    try:
+                        cat = str(entry.get("category", "unknown"))
+                        eid = str(entry.get("entity_id", "unknown"))
+                        val = float(entry.get("value", 0))
+                        graph.store_value(cat, eid, val)
+                    except (ValueError, TypeError):
+                        continue
+
+                for triple in extracted.get("triples", []):
+                    if isinstance(triple, list) and len(triple) == 3:
+                        h, r, t = str(triple[0]), str(triple[1]), str(triple[2])
+                        if h and r and t:
+                            graph.add_triple(h, r, t)
+
+            else:
+                # Default or hybrid: regex-based with optional LLM fallback
                 col_types = classify_columns(rows)
+
+                if mode == "hybrid":
+                    headers = [c for c in rows[0].keys() if not c.startswith("_")]
+                    label_count = sum(1 for t in col_types.values() if t == "label")
+                    numeric_count = sum(1 for t in col_types.values() if t == "numeric")
+
+                    if numeric_count == 0 or label_count == len(col_types):
+                        llm_types = llm_classify_columns(
+                            llm_client, headers, rows, llm_model)
+                        if llm_types:
+                            col_types.update(llm_types)
+
+                    entity_col = detect_entity_column(rows, col_types)
+                    if entity_col is None:
+                        entity_col = llm_detect_entity_column(
+                            llm_client, headers, rows, col_types, llm_model)
+                        if entity_col and entity_col in col_types:
+                            col_types[entity_col] = "label"
+
                 ingest_table(graph, section_name, subsection, rows, col_types)
 
-        # Ingest bullet-list KVs
-        kvs = parse_bullet_kvs(content)
-        if kvs:
-            ingest_bullets(graph, section_name, kvs)
+        # Ingest non-table content
+        if mode == "llm_only":
+            # LLM extracts from bullets and prose
+            # Filter out table lines for the prose extraction
+            non_table_lines = [l for l in content.split("\n")
+                               if not l.strip().startswith("|")]
+            non_table_text = "\n".join(non_table_lines).strip()
+            if non_table_text:
+                extracted = llm_extract_bullets_and_prose(
+                    llm_client, section_name, non_table_text, llm_model)
+
+                for entry in extracted.get("enm", []):
+                    try:
+                        cat = str(entry.get("category", "unknown"))
+                        eid = str(entry.get("entity_id", "unknown"))
+                        val = float(entry.get("value", 0))
+                        graph.store_value(cat, eid, val)
+                    except (ValueError, TypeError):
+                        continue
+
+                for triple in extracted.get("triples", []):
+                    if isinstance(triple, list) and len(triple) == 3:
+                        h, r, t = str(triple[0]), str(triple[1]), str(triple[2])
+                        if h and r and t:
+                            graph.add_triple(h, r, t)
+        else:
+            # Default and hybrid: regex bullet extraction
+            kvs = parse_bullet_kvs(content)
+            if kvs:
+                ingest_bullets(graph, section_name, kvs)
+
+            # Hybrid: also extract relations from prose
+            if mode == "hybrid":
+                triples = llm_extract_relations(
+                    llm_client, section_name, content, llm_model)
+                for head, relation, tail in triples:
+                    graph.add_triple(head, relation, tail)
+                    val = try_float(tail)
+                    if val is not None:
+                        section_tag = re.sub(r"^\d+\.\s*", "", section_name).strip()
+                        section_tag = re.sub(r"[^a-zA-Z0-9_\s]", "", section_tag).strip()
+                        section_tag = section_tag.replace(" ", "_").lower()
+                        enm_id = f"{head}/{relation}"
+                        graph.store_value(section_tag, enm_id, val)
 
     return graph

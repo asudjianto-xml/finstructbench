@@ -76,20 +76,36 @@ class DocumentGraph:
 
     def __init__(self):
         self.enm: dict[ENMKey, ENMEntry] = OrderedDict()
+        self.enm_meta: dict[ENMKey, dict[str, str]] = {}
         self.triples: list[tuple[str, str, str]] = []
         self.phase_encoders: dict[str, PhaseEncoder] = {}
         self.metadata: dict[str, Any] = {}
 
     # --- ENM operations ---
 
-    def store_value(self, category: str, entity_id: str, value: float):
-        """Store an exact numeric value."""
+    def store_value(self, category: str, entity_id: str, value: float,
+                    column: str | None = None, entity: str | None = None):
+        """Store an exact numeric value.
+
+        Args:
+            category: Section-derived ENM type (for graph baseline).
+            entity_id: Composite entity ID (may include column name).
+            value: The numeric value.
+            column: Original column header name (for external verification).
+            entity: Original entity name without column suffix.
+        """
         key = ENMKey(type=category, id=entity_id)
         entry = ENMEntry(
             key=key, value=value,
             hash=ENMEntry.compute_hash(value),
         )
         self.enm[key] = entry
+        if column or entity:
+            self.enm_meta[key] = {}
+            if column:
+                self.enm_meta[key]["column"] = column
+            if entity:
+                self.enm_meta[key]["entity"] = entity
 
     def lookup(self, category: str, entity_id: str) -> float | None:
         """Exact key lookup."""

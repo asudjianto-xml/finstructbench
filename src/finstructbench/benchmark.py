@@ -16,6 +16,7 @@ from finstructbench.ingest import ingest_markdown
 from finstructbench.generators import default_generators
 from finstructbench.scorers import score_answer, PARSERS
 from finstructbench.llm_caller import call_llm, create_client
+from finstructbench.paraphrase import paraphrase_questions
 
 
 @dataclass
@@ -48,12 +49,44 @@ class BenchmarkResult:
 
 class Benchmark:
     def __init__(self, markdown_path, generators=None,
-                 max_per_category=10, seed=42):
+                 max_per_category=10, seed=42, relevance_filter=None,
+                 ingest_mode="default", llm_client=None,
+                 llm_model="claude-sonnet-4-20250514",
+                 question_mode="deterministic"):
+        """Initialize the benchmark.
+
+        Args:
+            markdown_path: Path to the markdown financial report.
+            generators: List of QuestionGenerator instances (default: all 10).
+            max_per_category: Max questions sampled per category.
+            seed: Random seed for reproducible sampling.
+            relevance_filter: Optional RelevanceFilter for business relevance.
+            ingest_mode: Document ingestion mode.
+            llm_client: Anthropic client (needed for hybrid mode and LLM eval).
+            llm_model: Model for paraphrasing in hybrid mode.
+            question_mode: "deterministic" (default) or "hybrid".
+                - deterministic: Template-based questions. Fully reproducible,
+                  zero cost, no LLM involved in question generation.
+                - hybrid: Deterministic logic + LLM paraphrase. Preserves
+                  ground truth and evaluation prompts; only the natural
+                  language presentation is paraphrased for linguistic diversity.
+        """
+        if question_mode not in ("deterministic", "hybrid"):
+            raise ValueError(
+                f"question_mode must be 'deterministic' or 'hybrid', "
+                f"got '{question_mode}'"
+            )
+
         self.markdown_path = markdown_path
         self.instance_name = os.path.splitext(os.path.basename(markdown_path))[0]
+        self.question_mode = question_mode
+        self._llm_client = llm_client
+        self._llm_model = llm_model
 
-        print(f"Ingesting: {markdown_path}")
-        self.graph = ingest_markdown(markdown_path)
+        print(f"Ingesting: {markdown_path} (mode={ingest_mode})")
+        self.graph = ingest_markdown(
+            markdown_path, mode=ingest_mode,
+            llm_client=llm_client, llm_model=llm_model)
         stats = self.graph.stats()
         print(f"  ENM entries: {stats['enm_entries']}")
         print(f"  KG triples: {stats['triples']}")
@@ -65,16 +98,43 @@ class Benchmark:
         self.generators = generators or default_generators()
         self.max_per_category = max_per_category
         self.seed = seed
+        self.relevance_filter = relevance_filter
 
     def generate_questions(self):
         all_qs = []
-        print("\nGenerating questions from graph topology...")
+        filter_name = self.relevance_filter.name if self.relevance_filter else "none"
+        print(f"\nGenerating questions from graph topology "
+              f"(filter={filter_name}, mode={self.question_mode})...")
         for gen in self.generators:
             candidates = gen.generate(self.graph)
-            sampled = gen.sample(candidates, self.max_per_category, self.seed)
-            print(f"  {gen.category}: {len(candidates)} candidates -> {len(sampled)} selected")
+            if self.relevance_filter:
+                filtered = self.relevance_filter.filter(candidates, self.graph)
+                sampled = gen.sample(filtered, self.max_per_category, self.seed)
+                print(f"  {gen.category}: {len(candidates)} -> "
+                      f"{len(filtered)} filtered -> {len(sampled)} selected")
+            else:
+                sampled = gen.sample(candidates, self.max_per_category, self.seed)
+                print(f"  {gen.category}: {len(candidates)} candidates -> "
+                      f"{len(sampled)} selected")
             all_qs.extend(sampled)
         print(f"  Total: {len(all_qs)}")
+
+        # Hybrid mode: paraphrase natural language while preserving ground truth
+        if self.question_mode == "hybrid":
+            if self._llm_client is None:
+                raise ValueError(
+                    "Hybrid question mode requires an LLM client. "
+                    "Pass llm_client= to Benchmark() or set ANTHROPIC_API_KEY."
+                )
+            print(f"\nParaphrasing {len(all_qs)} questions (hybrid mode)...")
+            all_qs = paraphrase_questions(
+                all_qs,
+                self._llm_client,
+                model=self._llm_model,
+                use_cache=True,
+                verbose=True,
+            )
+
         return all_qs
 
     def run(self, llm_client=None, model="claude-sonnet-4-20250514"):
@@ -203,15 +263,35 @@ def main():
     parser.add_argument("--no-llm", action="store_true")
     parser.add_argument("--output", default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--question-mode",
+        choices=["deterministic", "hybrid"],
+        default="deterministic",
+        help=(
+            "Question generation mode. 'deterministic' (default): "
+            "template-based, fully reproducible, no LLM cost. "
+            "'hybrid': deterministic logic + LLM paraphrase for "
+            "linguistic diversity (requires API key)."
+        ),
+    )
+    parser.add_argument(
+        "--paraphrase-model",
+        default="claude-sonnet-4-20250514",
+        help="Model to use for paraphrasing in hybrid mode.",
+    )
     args = parser.parse_args()
+
+    client = None if args.no_llm else create_client()
 
     bench = Benchmark(
         args.markdown,
         max_per_category=args.max_per_category,
         seed=args.seed,
+        question_mode=args.question_mode,
+        llm_client=client,
+        llm_model=args.paraphrase_model,
     )
 
-    client = None if args.no_llm else create_client()
     result = bench.run(llm_client=client, model=args.model)
     bench.print_results(result)
 

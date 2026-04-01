@@ -1163,12 +1163,14 @@ table structure.
 
 \subsection{Setup}
 
-We evaluate Claude Sonnet~4 (\texttt{claude-sonnet-4-20250514}) against
-the graph baseline across all five instances and all ten question
-categories.  The LLM receives the complete markdown document as context
-(500--1{,}000 lines) along with a structured prompt for each question
-specifying the expected answer format.  We use 10 questions per category
-(where available), sampled with seed~42, yielding 454 questions per mode.
+We evaluate two Claude model variants against the graph baseline across
+all five instances and all ten question categories:
+\textbf{Claude Sonnet~4} (\texttt{claude-sonnet-4-20250514}) and
+\textbf{Claude Opus~4.6} (\texttt{claude-opus-4-6}).  The LLM receives
+the complete markdown document as context (500--1{,}000 lines) along
+with a structured prompt for each question specifying the expected
+answer format.  We use 10 questions per category (where available),
+sampled with seed~42, yielding 454 questions per mode.
 
 To assess the effect of question phrasing on LLM performance, we run
 the full benchmark in two modes: \emph{deterministic} (template-generated
@@ -1183,90 +1185,91 @@ does not alter the ground truth.
 \begin{table}[t]
 \centering
 \caption{Overall benchmark results: Graph baseline vs.\ Claude Sonnet~4
-in deterministic and hybrid question modes.}
+and Claude Opus~4.6 (deterministic question mode).}
 \label{tab:main_results}
 \small
-\begin{tabular}{lccccc}
+\begin{tabular}{lccccr}
 \toprule
-Instance & Questions & Graph & Det.\ LLM & Hyb.\ LLM & $\Delta$ \\
+Instance & Questions & Graph & Sonnet~4 & Opus~4.6 & $\Delta$ \\
 \midrule
 Model Validation & 100 & 100 (100\%) & 69 (69\%) & 71 (71\%) & $+2$ \\
-Fair Lending & 90 & 90 (100\%) & 57 (63\%) & 59 (66\%) & $+2$ \\
-Stress Test & 90 & 90 (100\%) & 27 (30\%) & 27 (30\%) & $0$ \\
-Credit Portfolio & 90 & 90 (100\%) & 53 (59\%) & 57 (63\%) & $+4$ \\
-Basel Capital & 84 & 84 (100\%) & 57 (68\%) & 54 (64\%) & $-3$ \\
+Fair Lending & 90 & 90 (100\%) & 57 (63\%) & 64 (71\%) & $+7$ \\
+Stress Test & 90 & 90 (100\%) & 27 (30\%) & 34 (38\%) & $+7$ \\
+Credit Portfolio & 90 & 90 (100\%) & 53 (59\%) & 64 (71\%) & $+11$ \\
+Basel Capital & 84 & 84 (100\%) & 57 (68\%) & 64 (76\%) & $+7$ \\
 \midrule
-\textbf{Total} & \textbf{454} & \textbf{454 (100\%)} & \textbf{263 (58\%)} & \textbf{268 (59\%)} & $\mathbf{+5}$ \\
+\textbf{Total} & \textbf{454} & \textbf{454 (100\%)} & \textbf{263 (58\%)} & \textbf{297 (65\%)} & $\mathbf{+34}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:main_results} presents the overall results.  The graph
-baseline achieves 100\% across all instances by construction.  Claude
-Sonnet~4 achieves 58\% overall in deterministic mode and 59\% in
-hybrid mode---a marginal improvement of 5~questions (+1~pp).
-Per-instance scores range from 30\% (Stress Test) to 69--71\%
-(Model Validation), reflecting substantial variation in document
-complexity.
+Table~\ref{tab:main_results} presents the overall results in
+deterministic mode.  The graph baseline achieves 100\% across all
+instances by construction.  Claude Sonnet~4 achieves 58\% overall
+and Claude Opus~4.6 achieves 65\%---a 7~percentage-point improvement.
+Opus outperforms Sonnet on every instance, with the largest gain on
+Credit Portfolio (+12~pp).  Per-instance scores range from 30--38\%
+(Stress Test) to 69--71\% (Model Validation), reflecting substantial
+variation in document complexity that persists across model scales.
 
 \subsection{Results by Question Category}
 
 \begin{table}[t]
 \centering
-\caption{Results by question category (aggregated across all instances),
-ordered by decreasing deterministic LLM accuracy.}
+\caption{Results by question category (aggregated across all instances,
+deterministic mode), ordered by decreasing Opus accuracy.}
 \label{tab:by_category}
 \small
-\begin{tabular}{lcccccc}
+\begin{tabular}{lcccccr}
 \toprule
-Category & Graph Op. & Total & Graph & Det.\ LLM & Hyb.\ LLM & $\Delta$ \\
+Category & Graph Op. & Total & Graph & Sonnet~4 & Opus~4.6 & $\Delta$ \\
 \midrule
-Absence & $\nexists\,(h,r,t)$ & 50 & 50 & 47 (94\%) & 47 (94\%) & $0$ \\
-Threshold & $\phi(v) \geq \tau$ & 50 & 50 & 37 (74\%) & 36 (72\%) & $-1$ \\
+Absence & $\nexists\,(h,r,t)$ & 50 & 50 & 47 (94\%) & 49 (98\%) & $+2$ \\
+Threshold & $\phi(v) \geq \tau$ & 50 & 50 & 37 (74\%) & 44 (88\%) & $+7$ \\
+Cross-Reference & $S_1 \cap S_2$ & 50 & 50 & 29 (58\%) & 38 (76\%) & $+9$ \\
+Ranking & $\text{sort}(\{v_i\})[k]$ & 50 & 50 & 33 (66\%) & 37 (74\%) & $+4$ \\
 Multi-Hop & chain$(f_1, f_2)$ & 50 & 50 & 34 (68\%) & 33 (66\%) & $-1$ \\
-Ranking & $\text{sort}(\{v_i\})[k]$ & 50 & 50 & 33 (66\%) & 33 (66\%) & $0$ \\
-Cross-Reference & $S_1 \cap S_2$ & 50 & 50 & 29 (58\%) & 34 (68\%) & $+5$ \\
-Exact Recall & $\mathcal{E}[k]$ & 50 & 50 & 26 (52\%) & 24 (48\%) & $-2$ \\
+Exact Recall & $\mathcal{E}[k]$ & 50 & 50 & 26 (52\%) & 27 (54\%) & $+1$ \\
+Numeric Comp. & $f(v_1, v_2)$ & 50 & 50 & 17 (34\%) & 27 (54\%) & $+10$ \\
 Cross-Table Agg. & $\sum_i f(T_i)$ & 44 & 44 & 21 (48\%) & 21 (48\%) & $0$ \\
-Numeric Comp. & $f(v_1, v_2)$ & 50 & 50 & 17 (34\%) & 18 (36\%) & $+1$ \\
 Counting & $|\{h : (h,r,t)\}|$ & 50 & 50 & 16 (32\%) & 19 (38\%) & $+3$ \\
-Contradiction & $\exists\, \text{pass} \land \exists\, \text{fail}$ & 10 & 10 & 3 (30\%) & 3 (30\%) & $0$ \\
+Contradiction & $\exists\, \text{pass} \land \exists\, \text{fail}$ & 10 & 10 & 3 (30\%) & 2 (20\%) & $-1$ \\
 \midrule
-\textbf{Total} & --- & \textbf{454} & \textbf{454} & \textbf{263 (58\%)} & \textbf{268 (59\%)} & $\mathbf{+5}$ \\
+\textbf{Total} & --- & \textbf{454} & \textbf{454} & \textbf{263 (58\%)} & \textbf{297 (65\%)} & $\mathbf{+34}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Table~\ref{tab:by_category} reveals a clear complexity gradient across
-the ten question categories.  We highlight the key patterns:
+the ten question categories and highlights the effect of model scale.
+We discuss the key patterns:
 
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{Absence (94\%):}  Verifying that an entity does not
-    exist in the graph.  The LLM excels at this task because it
+  \item \textbf{Absence (94--98\%):}  Verifying that an entity does not
+    exist in the graph.  Both models excel at this task because it
     requires confirming the non-existence of a specific value---a
     form of focused search that plays to the model's strengths.
-  \item \textbf{Threshold (74\%):}  Simple inequality checks against a
-    single value.  The LLM only needs to locate one number and compare
-    it to a threshold.
-  \item \textbf{Multi-Hop (68\%):}  Chained lookup requiring an
-    intermediate computation (e.g., argmin/argmax) followed by a
-    cross-type lookup.  Performance varies substantially across
-    instances (30--90\%), suggesting sensitivity to table structure.
-  \item \textbf{Ranking and Cross-Reference (58--66\%):}  Tasks
-    requiring comparison across multiple entities or relation types.
-    Cross-reference shows the largest hybrid improvement ($+5$),
-    suggesting that more natural phrasing helps the LLM parse
-    set-intersection queries.
-  \item \textbf{Exact Recall (52\%):}  Precise numeric lookup.  Despite
-    being a single-hop operation, LLMs frequently return nearby values
-    from the same table or confuse similarly-named entities.
+  \item \textbf{Threshold (74--88\%):}  Simple inequality checks against a
+    single value.  Opus shows the second-largest category gain (+14~pp),
+    suggesting better numeric comparison ability.
+  \item \textbf{Cross-Reference (58--76\%):}  Set intersection across two
+    relation types.  Opus improves substantially (+18~pp), indicating
+    better ability to identify entities across multiple contexts.
+  \item \textbf{Numeric Computation (34--54\%):}  Arithmetic over
+    extracted values.  This is the largest Opus improvement (+20~pp),
+    reflecting stronger arithmetic reasoning in the larger model.
+  \item \textbf{Multi-Hop (66--68\%):}  Chained lookup requiring an
+    intermediate computation followed by a cross-type lookup.
+    Notably, Opus does \emph{not} improve on multi-hop ($-1$),
+    suggesting that sequential structured traversal remains a
+    fundamental challenge regardless of model scale.
   \item \textbf{Cross-Table Aggregation (48\%):}  Aggregating values
-    across multiple tables.  Requires identifying and combining
-    information from different document sections.
-  \item \textbf{Numeric Computation (34\%) and Counting (32\%):}
-    Exhaustive enumeration or arithmetic over extracted values.  LLMs
-    tend to undercount or introduce calculation errors.
-  \item \textbf{Contradiction (30\%):}  Global consistency checking
+    across multiple tables.  Both models score identically,
+    indicating that cross-section reasoning is a structural
+    limitation rather than a capacity limitation.
+  \item \textbf{Counting (32--38\%):}  Exhaustive enumeration.  Both
+    models undercount, with only modest Opus improvement (+3).
+  \item \textbf{Contradiction (20--30\%):}  Global consistency checking
     across segments---the most challenging category (though limited
     to 10~questions from the Model Validation instance).
 \end{itemize}
@@ -1275,50 +1278,55 @@ the ten question categories.  We highlight the key patterns:
 
 \begin{table}[t]
 \centering
-\caption{Claude Sonnet~4 accuracy by instance and category
-(deterministic mode).  Each cell shows correct/total.  Shading
-indicates: {\colorbox{green!15}{$\geq$80\%}},
+\caption{LLM accuracy by instance and category (deterministic mode).
+Each cell shows Sonnet/Opus correct out of~10.  Shading is based on
+Opus score: {\colorbox{green!15}{$\geq$80\%}},
 {\colorbox{yellow!30}{40--79\%}}, {\colorbox{red!15}{$<$40\%}}.}
 \label{tab:heatmap}
 \footnotesize
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{2.5pt}
 \begin{tabular}{l*{10}{c}}
 \toprule
-& \rotatebox{70}{Absence} & \rotatebox{70}{Threshold} & \rotatebox{70}{Multi-Hop} & \rotatebox{70}{Ranking} & \rotatebox{70}{Cross-Ref} & \rotatebox{70}{Exact Recall} & \rotatebox{70}{Cross-Tbl Agg} & \rotatebox{70}{Numeric Comp} & \rotatebox{70}{Counting} & \rotatebox{70}{Contradiction} \\
+& \rotatebox{70}{Absence} & \rotatebox{70}{Threshold} & \rotatebox{70}{Cross-Ref} & \rotatebox{70}{Ranking} & \rotatebox{70}{Multi-Hop} & \rotatebox{70}{Exact Recall} & \rotatebox{70}{Numeric Comp} & \rotatebox{70}{Cross-Tbl Agg} & \rotatebox{70}{Counting} & \rotatebox{70}{Contradiction} \\
 \midrule
-Model Valid. & \cellcolor{green!15}9/10 & \cellcolor{green!15}10/10 & \cellcolor{green!15}8/10 & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}7/10 & \cellcolor{yellow!30}6/10 & \cellcolor{green!15}10/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}3/10 \\
-Fair Lending & \cellcolor{green!15}10/10 & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{yellow!30}5/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}2/10 & \cellcolor{yellow!30}4/10 & --- \\
-Stress Test & \cellcolor{green!15}8/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}1/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}1/10 & --- \\
-Credit Port. & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}4/10 & \cellcolor{green!15}8/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{green!15}9/10 & \cellcolor{red!15}0/10 & \cellcolor{yellow!30}6/10 & \cellcolor{red!15}3/10 & --- \\
-Basel Capital & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}6/10 & \cellcolor{green!15}9/10 & \cellcolor{green!15}9/10 & \cellcolor{red!15}3/10 & \cellcolor{yellow!30}5/10 & \cellcolor{yellow!30}4/4 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}5/10 & --- \\
+Model Valid. & \cellcolor{green!15}9/10 & \cellcolor{green!15}10/10 & \cellcolor{green!15}7/9 & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}8/6 & \cellcolor{yellow!30}6/6 & \cellcolor{red!15}3/3 & \cellcolor{green!15}10/10 & \cellcolor{red!15}3/5 & \cellcolor{red!15}3/2 \\
+Fair Lending & \cellcolor{green!15}10/10 & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}5/5 & \cellcolor{green!15}7/8 & \cellcolor{yellow!30}6/7 & \cellcolor{yellow!30}6/7 & \cellcolor{yellow!30}2/5 & \cellcolor{green!15}7/8 & \cellcolor{yellow!30}4/4 & --- \\
+Stress Test & \cellcolor{green!15}8/9 & \cellcolor{green!15}7/10 & \cellcolor{green!15}7/8 & \cellcolor{red!15}1/2 & \cellcolor{red!15}3/3 & \cellcolor{red!15}0/0 & \cellcolor{red!15}0/1 & \cellcolor{red!15}0/0 & \cellcolor{red!15}1/1 & --- \\
+Credit Port. & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}4/4 & \cellcolor{green!15}7/9 & \cellcolor{green!15}6/9 & \cellcolor{green!15}8/8 & \cellcolor{green!15}9/9 & \cellcolor{green!15}6/9 & \cellcolor{red!15}0/2 & \cellcolor{red!15}3/4 & --- \\
+Basel Cap. & \cellcolor{green!15}10/10 & \cellcolor{green!15}6/10 & \cellcolor{yellow!30}3/7 & \cellcolor{green!15}9/8 & \cellcolor{green!15}9/9 & \cellcolor{yellow!30}5/5 & \cellcolor{green!15}6/9 & \cellcolor{red!15}4/1$^*$ & \cellcolor{yellow!30}5/5 & --- \\
 \bottomrule
+\multicolumn{11}{l}{\scriptsize Each cell: Sonnet/Opus (out of 10 unless noted). $^*$Basel cross-table agg.\ has 4~questions.}
 \end{tabular}
 \end{table}
 
 Table~\ref{tab:heatmap} shows the full instance $\times$ category
-breakdown in deterministic mode.  Several patterns emerge:
+breakdown in deterministic mode for both models.  Several patterns
+emerge:
 
-\paragraph{Absence is consistently high.}
-All five instances score $\geq$80\% on absence detection, confirming
-that LLMs are reliable at verifying that a specific value does not
-appear in the document.
+\paragraph{Absence is consistently high for both models.}
+All five instances score $\geq$80\% on absence detection with both
+Sonnet and Opus, confirming that LLMs are reliable at verifying that
+a specific value does not appear in the document.
 
 \paragraph{Stress Test is consistently hard.}
-Stress Test scores only 30\% overall, with 0/10 on exact recall,
-numeric computation, and cross-table aggregation.  The dense
-quarter~$\times$~scenario matrices cause systematic extraction failures.
+Stress Test scores only 30\% (Sonnet) and 38\% (Opus) overall.
+Both models score 0/10 on exact recall and cross-table aggregation
+in this instance.  The dense quarter~$\times$~scenario matrices
+cause systematic extraction failures regardless of model capacity.
 
-\paragraph{Instance difficulty varies widely.}
-Model Validation is the easiest instance (69\%), benefiting from
-well-labeled tables and distinctive entity names.  Stress Test (30\%)
-and Credit Portfolio (59\%) are harder due to wide matrices and
-complex hierarchical structures.
+\paragraph{Opus gains are concentrated in specific categories.}
+Opus improves most on numeric computation (e.g., Credit Portfolio:
+6$\to$9, Basel: 6$\to$9) and cross-reference (e.g., Model Validation:
+7$\to$9, Credit Portfolio: 7$\to$9).  Categories where both models
+struggle---counting, contradiction, cross-table aggregation---show
+minimal improvement, suggesting these are structural limitations
+rather than capacity-dependent.
 
-\paragraph{Category difficulty is instance-dependent.}
-Multi-hop ranges from 3/10 (Stress Test) to 9/10 (Basel Capital),
-and cross-table aggregation ranges from 0/10 (Stress Test, Credit
-Portfolio) to 10/10 (Model Validation), demonstrating that structural
-complexity interacts with document layout.
+\paragraph{Instance difficulty ordering is preserved.}
+Both models find Stress Test hardest and Model Validation easiest.
+The relative difficulty ranking across instances is stable, indicating
+that document structure is a stronger determinant of difficulty than
+model capability.
 
 \subsection{Deterministic vs.\ Hybrid Question Mode}
 \label{sec:det_vs_hybrid}

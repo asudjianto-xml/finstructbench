@@ -27,4 +27,5 @@ from finstructbench.graph import DocumentGraph, ENMKey, ENMEntry, PhaseEncoder
 from finstructbench.ingest import ingest_markdown
 from finstructbench.benchmark import Benchmark, BenchmarkResult
 from finstructbench.generators import default_generators
+from finstructbench.paraphrase import paraphrase_questions
 from finstructbench.instances import get_instance_path, list_instances

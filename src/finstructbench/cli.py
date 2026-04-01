@@ -23,6 +23,11 @@ def main():
                        help="Graph-only evaluation (no LLM API calls)")
     run_p.add_argument("--output", default=None, help="Output JSON path")
     run_p.add_argument("--seed", type=int, default=42)
+    run_p.add_argument("--ingest-mode", choices=["default", "hybrid"],
+                       default="default",
+                       help="Ingestion mode: 'default' (rule-based) or "
+                            "'hybrid' (LLM-assisted column classification, "
+                            "entity detection, and relation extraction)")
 
     # --- list-instances ---
     list_p = sub.add_parser("list-instances",
@@ -47,18 +52,23 @@ def main():
 
 
 def _cmd_run(args):
+    # Create LLM client if needed for evaluation or hybrid ingestion
+    client = None
+    if not args.no_llm or args.ingest_mode == "hybrid":
+        from finstructbench.llm_caller import create_client
+        client = create_client()
+
     bench = Benchmark(
         args.markdown,
         max_per_category=args.max_per_category,
         seed=args.seed,
+        ingest_mode=args.ingest_mode,
+        llm_client=client,
+        llm_model=args.model,
     )
 
-    client = None
-    if not args.no_llm:
-        from finstructbench.llm_caller import create_client
-        client = create_client()
-
-    result = bench.run(llm_client=client, model=args.model)
+    eval_client = client if not args.no_llm else None
+    result = bench.run(llm_client=eval_client, model=args.model)
     bench.print_results(result)
 
     output = args.output or f"finstructbench_results/{bench.instance_name}.json"
