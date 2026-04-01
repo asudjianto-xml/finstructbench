@@ -2,19 +2,35 @@
 
 **Benchmark for Structured Information Retrieval from Financial Documents**
 
-FinStructBench evaluates how well LLMs extract, aggregate, and reason over structured data in financial documents. Questions are auto-generated from a document's knowledge graph, making ground truth **provably correct by construction**.
+FinStructBench evaluates how well LLMs extract, aggregate and reason over structured data in financial documents. Questions are auto-generated from a document's knowledge graph, making ground truth **provably correct by construction**.
 
 ## Key Results
 
+**LLM Evaluation** (454 questions, Claude Sonnet 4, deterministic mode):
+
 | Category | Graph Baseline | Claude Sonnet 4 |
 |---|---|---|
-| Threshold | 100% | 86% |
-| Cross-Reference | 100% | 62% |
-| Exact Recall | 100% | 44% |
-| Counting | 100% | 34% |
-| Contradiction | 100% | 20% |
-| Multi-Hop | 100% | **0%** |
-| **Overall** | **100%** | **45%** |
+| Absence | 100% | 94% |
+| Threshold | 100% | 74% |
+| Multi-Hop | 100% | 68% |
+| Ranking | 100% | 66% |
+| Cross-Reference | 100% | 58% |
+| Exact Recall | 100% | 52% |
+| Cross-Table Agg. | 100% | 48% |
+| Numeric Comp. | 100% | 34% |
+| Counting | 100% | 32% |
+| Contradiction | 100% | 30% |
+| **Overall** | **100%** | **58%** |
+
+**Ingestion Mode Comparison** (Claude Opus 4, 5 instances):
+
+| Mode | ENM Entries | Triples (unique) | Regex Recovery |
+|---|---|---|---|
+| Regex (default) | 3,887 | 7,997 | --- |
+| LLM-Only | 487 | 1,251 | 1.8% |
+| Hybrid | 4,745 | 9,083 | 97.2% |
+
+LLM-only extraction recovers only 12.5% of structured data. Hybrid ingestion preserves 100% of regex values exactly while adding 22% more entries from prose extraction.
 
 ## Installation
 
@@ -45,6 +61,9 @@ finstructbench run finstructbench/instances/fair_lending.md
 
 # Customize
 finstructbench run report.md --max-per-category 20 --model claude-sonnet-4-20250514 --seed 42
+
+# Hybrid ingestion mode
+finstructbench run report.md --ingest-mode hybrid
 ```
 
 ### Python API
@@ -81,13 +100,14 @@ bench.print_results(result)
 
 ## Bundled Instances
 
-| Instance | Regulatory Context | ENM | Triples | Questions |
-|---|---|---|---|---|
-| `model_validation` | SR 11-7 | 261 | 5,586 | 60 |
-| `fair_lending` | ECOA / HMDA | 866 | 1,962 | 50 |
-| `stress_test` | CCAR / DFAST | 207 | 1,355 | 50 |
-| `credit_portfolio` | OCC Guidelines | 211 | 2,334 | 50 |
-| `basel_capital` | Basel III Pillar 3 | 27 | 785 | 48 |
+| Instance | Regulatory Context | ENM | Triples | Questions | Categories |
+|---|---|---|---|---|---|
+| `model_validation` | SR 11-7 | 275 | 5,586 | 100 | 10 |
+| `fair_lending` | ECOA / HMDA | 1,139 | 2,014 | 90 | 9 |
+| `stress_test` | CCAR / DFAST | 476 | 1,417 | 90 | 9 |
+| `credit_portfolio` | OCC Guidelines | 1,503 | 2,356 | 90 | 9 |
+| `basel_capital` | Basel III Pillar 3 | 494 | 784 | 84 | 9 |
+| **Total** | | **3,887** | **12,157** | **454** | |
 
 ## Question Categories
 
@@ -97,6 +117,10 @@ bench.print_results(result)
 4. **Counting** — Count triples matching a pattern
 5. **Contradiction** — Detect pass/fail inconsistencies across segments
 6. **Multi-Hop** — Chained queries (argmin/argmax + cross-type lookup)
+7. **Absence** — Verify that an entity or relation does not exist
+8. **Ranking** — Rank entities by a numeric attribute
+9. **Numeric Computation** — Compute ratios, differences or aggregates
+10. **Cross-Table Aggregation** — Aggregate values across multiple tables
 
 ## How It Works
 
@@ -104,9 +128,14 @@ bench.print_results(result)
 2. **Generate**: Mine graph topology → questions with provably correct answers
 3. **Evaluate**: Graph baseline (100% by construction) vs. LLM under test
 
+The ingestion pipeline supports three modes:
+- **Regex** (default): Deterministic regex extraction with SHA-256 integrity hashing
+- **Hybrid**: Regex base + LLM fallback for ambiguous columns and prose extraction
+- **LLM-Only**: Full LLM extraction (for research comparison only)
+
 ## MCP Server (Claude Integration)
 
-FinStructBench includes an MCP server that exposes graph operations as tools, enabling Claude to perform **deterministic graph traversal** instead of extracting structured data from raw text. This directly addresses the 0% multi-hop accuracy by letting Claude call tools for each hop.
+FinStructBench includes an MCP server that exposes graph operations as tools, enabling Claude to perform **deterministic graph traversal** instead of extracting structured data from raw text.
 
 ### Installation
 
@@ -163,7 +192,7 @@ Add to `~/.claude/settings.json`:
 | `query_enm` | Direct ENM key-value lookup with filtering |
 | `query_triples` | Pattern-match KG triples (head/relation/tail) |
 
-**Discovery & management:**
+**Discovery and management:**
 
 | Tool | What it does |
 |---|---|
@@ -175,7 +204,7 @@ Add to `~/.claude/settings.json`:
 
 ### Skill File
 
-`SKILL.md` provides Claude with conventions for classifying questions into the six categories, discovering document schema, and composing tool calls. Place it in your project root or reference it in your Claude Code configuration.
+`SKILL.md` provides Claude with conventions for classifying questions into the ten categories, discovering document schema and composing tool calls. Place it in your project root or reference it in your Claude Code configuration.
 
 ## Extending
 
