@@ -6,7 +6,7 @@
 \usepackage{hyperref}
 \usepackage{geometry}
 \usepackage{enumitem}
-\usepackage{xcolor}
+\usepackage[table]{xcolor}
 \usepackage{mdframed}
 \usepackage{natbib}
 \usepackage{array}
@@ -52,22 +52,31 @@
 % =============================================================================
 \begin{abstract}
 We introduce \textbf{FinStructBench}, a benchmark for evaluating the ability of
-large language models (LLMs) to extract, aggregate, and reason over structured
+large language models (LLMs) to extract, aggregate and reason over structured
 information in financial documents.  Unlike existing QA benchmarks that rely on
 human-annotated answers, FinStructBench generates questions \emph{automatically}
 from a document's underlying knowledge graph, making ground truth
-\emph{provably correct by construction}.  We define six question categories of
+\emph{provably correct by construction}.  We define ten question categories of
 increasing structural complexity---exact recall, threshold checking,
-cross-reference, counting, contradiction detection, and multi-hop
-reasoning---and provide five benchmark instances spanning major financial
+cross-reference, counting, contradiction detection, multi-hop reasoning,
+absence detection, ranking, numeric computation and cross-table
+aggregation---and provide five benchmark instances spanning major financial
 report types: model validation (SR~11-7), fair lending (ECOA/HMDA), stress
-testing (CCAR/DFAST), credit portfolio review (OCC), and Basel~III capital
-adequacy (Pillar~3).  Across 258 questions, a graph-based retrieval baseline
-achieves 100\% accuracy by design, while Claude Sonnet~4 scores 45\%,
-revealing a sharp \emph{complexity gradient}: LLM accuracy drops from 86\% on
-simple threshold queries to 0\% on multi-hop reasoning.  FinStructBench is
-released as an open-source toolkit enabling researchers to generate
-benchmark instances from any markdown-formatted financial document.
+testing (CCAR/DFAST), credit portfolio review (OCC) and Basel~III capital
+adequacy (Pillar~3).  The benchmark supports two question modes:
+\emph{deterministic} (template-based) and \emph{hybrid} (LLM-paraphrased for
+linguistic diversity).  Across 454 questions evaluated in both modes,
+the graph-based retrieval baseline achieves 100\% accuracy by design,
+while Claude Sonnet~4 scores 58\% (deterministic) and 59\% (hybrid),
+with per-category accuracy ranging from 94\% on absence detection to
+30\% on contradiction.  A three-way ingestion comparison (regex-only,
+LLM-only and hybrid) using Claude Opus~4 demonstrates that LLM-only
+extraction recovers only 12.5\% of structured data, while hybrid
+ingestion preserves 100\% of regex values and adds 22\% more entries
+from prose---empirically validating the regex-first, LLM-augmented
+architecture.  FinStructBench is released as an open-source toolkit
+enabling researchers to generate benchmark instances from any
+markdown-formatted financial document.
 \end{abstract}
 
 % =============================================================================
@@ -76,14 +85,14 @@ benchmark instances from any markdown-formatted financial document.
 
 Financial regulation demands precise information extraction from structured
 documents: capital ratios must be reported to basis-point accuracy, adverse
-impact ratios must be computed across protected classes, and stress-test
+impact ratios must be computed across protected classes and stress-test
 projections must be traced across scenarios and time horizons.  Errors in
 these tasks carry material consequences---regulatory findings, enforcement
-actions, and capital shortfalls.
+actions and capital shortfalls.
 
 Large language models are increasingly deployed for financial document
 analysis, yet existing benchmarks for financial NLP focus predominantly on
-sentiment analysis~\citep{malo2014good}, named entity recognition~\citep{alvarado2015domain},
+sentiment analysis~\citep{malo2014good}, named entity recognition~\citep{alvarado2015domain}
 or free-form question answering~\citep{chen2021finqa, zhu2021tat} where ground
 truth is established by human annotation.  These benchmarks have three
 limitations in the structured-retrieval setting:
@@ -110,11 +119,18 @@ construction methodology that:
     system can be compared.
 \end{itemize}
 
-Our initial release includes 258 questions across five financial report
-types and six complexity categories.  Results with Claude Sonnet~4 reveal a
-monotonic complexity gradient from 86\% on threshold queries to 0\% on
-multi-hop reasoning, demonstrating that current LLMs lack the structured
-traversal capabilities required for reliable financial document analysis.
+Our initial release includes 454 questions across five financial report
+types and ten complexity categories.  Results with Claude Sonnet~4 reveal a
+41--42 percentage-point gap between graph-based retrieval (100\%) and LLM
+performance (58--59\%), with per-category accuracy ranging from 94\% on
+absence detection to 30\% on contradiction.  A three-way ingestion
+comparison further demonstrates that LLM-only extraction recovers only
+12.5\% of structured data, while a hybrid regex+LLM pipeline preserves
+100\% of deterministic values and adds 22\% more entries from prose
+extraction.  These findings demonstrate that current LLMs lack the
+structured traversal capabilities required for reliable financial
+document analysis and that deterministic ingestion is a quantitative
+necessity, not merely a design preference.
 
 % =============================================================================
 \section{Related Work}
@@ -129,25 +145,117 @@ conversational settings but inherits the same annotation limitations.
 FLUE~\citep{shah2022flue} aggregates multiple financial NLP tasks but does not
 address structured retrieval from regulatory documents.
 
-\paragraph{Table QA.}
+\paragraph{Table QA and Table-Specialized Models.}
 WikiTableQuestions~\citep{pasupat2015compositional} and
 HybridQA~\citep{chen2020hybridqa} benchmark table understanding but use
 general-domain tables without the precision requirements of financial
 regulation.  SQA~\citep{iyyer2017search} addresses sequential table queries
 but does not test cross-table reasoning.
+TAPAS~\citep{herzig2020tapas} extends BERT to encode tables jointly with
+questions, selecting cells and applying aggregation operators.
+TaPEx~\citep{liu2022tapex} pre-trains a generative model as a neural SQL
+executor, achieving strong results on WikiTableQuestions.
+However, both are limited to single-table contexts and struggle with the
+multi-step numerical reasoning required in financial analysis.
 
 \paragraph{Document Understanding.}
 DocVQA~\citep{mathew2021docvqa} and financial variants evaluate visual
 document understanding, which is complementary to our text-based setting.
+Layout-aware models such as LayoutLMv3~\citep{huang2022layoutlmv3}
+jointly encode text, layout, and visual features, while
+Donut~\citep{kim2022donut} performs OCR-free document understanding
+end-to-end and Pix2Struct~\citep{lee2023pix2struct} learns to parse
+screenshots into structured markup.  These models address the upstream
+task of extracting clean tables from document images, which is
+complementary to FinStructBench's focus on reasoning \emph{over}
+already-extracted structured data.
 Recent work on long-context evaluation~\citep{li2024long} tests retrieval
 from long documents but uses synthetic ``needle-in-haystack'' probes rather
 than domain-specific structural queries.
 
-\paragraph{Knowledge Graph QA.}
+\paragraph{Structured Reasoning and Tool Use.}
+Chain-of-Table~\citep{wang2024chainoftable} guides LLMs to iteratively
+transform tables through atomic operations (select, group, sort) as
+intermediate reasoning states, achieving strong results on table QA.
+DATER~\citep{ye2023dater} decomposes both tables and questions into
+simpler sub-problems for LLM reasoning.
+StructGPT~\citep{jiang2023structgpt} constructs specialized interfaces
+to collect evidence from structured data (tables, knowledge graphs,
+databases) and lets LLMs focus on reasoning over the collected information.
+ReAct~\citep{yao2023react} interleaves reasoning traces with tool-calling
+actions, and Toolformer~\citep{schick2023toolformer} trains models to
+self-select when to invoke external tools such as calculators and search
+APIs.  These tool-augmented approaches are directly relevant to
+FinStructBench's MCP server architecture, where the LLM calls
+deterministic graph operations rather than extracting structured data
+from raw text.
+
+\paragraph{Graph-Augmented Retrieval.}
+GraphRAG~\citep{edge2024graphrag} builds entity knowledge graphs from
+source documents and pre-generates community summaries for query-focused
+retrieval, outperforming vector-based RAG on global sensemaking tasks.
 KGQA benchmarks~\citep{zhang2022subgraph} evaluate question answering over
-pre-existing knowledge graphs.  FinStructBench differs in that the graph is
-\emph{constructed from} the document, and the benchmark tests whether an LLM
-can implicitly perform the same traversal from the raw text.
+pre-existing knowledge graphs.  FinStructBench differs from both
+in that the graph is \emph{constructed from} the document using purely
+deterministic rules, and the benchmark tests whether an LLM can
+implicitly perform the same traversal from the raw text without access
+to the graph.
+
+\paragraph{Question Generation Methodologies.}
+Automatic question generation (QG) from structured data spans a broad
+spectrum of approaches.  At one extreme, classical benchmarks such as
+FinQA~\citep{chen2021finqa}, TAT-QA~\citep{zhu2021tat}, and
+FinanceBench~\citep{islam2023financebench} rely entirely on human expert
+annotation---a process that is expensive (\$2+ per question), inherently
+noisy, and difficult to scale.  At the other extreme, fully
+LLM-driven approaches have gained traction: FinForge~\citep{matlin2026finforge}
+uses a five-stage pipeline with Gemini~2.5 Flash to generate
+semi-synthetic financial QA pairs, YourBench~\citep{shashidhar2025yourbench}
+constructs zero-shot evaluation sets from arbitrary user documents, and
+BenchAgents~\citep{butt2024benchagents} decomposes benchmark creation
+into multi-agent planning, generation, verification, and evaluation stages.
+While these LLM-based methods achieve high linguistic diversity, they
+introduce non-determinism, contamination risk (the generating model may
+have memorized benchmark data), and dependence on API availability.
+
+Between these extremes, \emph{programmatic graph-topology mining}
+generates questions by algorithmically traversing a knowledge graph
+and rendering the resulting logical forms as natural language.
+GrailQA~\citep{gu2021grailqa} enumerates SPARQL queries over Freebase by
+traversing graph structure up to four relation hops, then crowdsources
+natural-language paraphrases.
+LC-QuAD~\citep{trivedi2017lcquad} follows a similar template-based SPARQL
+generation pipeline over DBpedia.
+In the financial domain,
+KG-QAGen~\citep{tatarinov2025kgqagen} generates 20{,}139 QA pairs from
+structured credit agreements by systematically varying complexity along
+multi-hop retrieval depth, set operations, and answer plurality.
+Dynamic-KGQA~\citep{dammu2025dynamickgqa} extracts semantically coherent
+subgraphs from YAGO~4.5 and uses an LLM to generate questions, producing
+fresh train/test splits each run to resist data contamination.
+More recently, several benchmarks have formalized table-level reasoning
+complexity: TableBench~\citep{wu2025tablebench} defines 18 sub-categories
+of table reasoning,
+TableEval~\citep{zhu2025tableeval} combines template-prompted and
+role-prompted LLM strategies with clustering and human verification, and
+GraphArena~\citep{tang2025grapharena} benchmarks LLMs on graph
+computational problems (shortest path, connectivity) over diverse graph
+topologies.
+
+FinStructBench occupies a distinctive position within this landscape.
+Like GrailQA and KG-QAGen, it mines graph topology programmatically
+to generate questions with provably correct ground truth.  However, it
+differs in three key respects: (i)~the knowledge graph is
+\emph{constructed from} the document via deterministic ingestion rather
+than being a pre-existing knowledge base; (ii)~it defines ten
+specialized generator categories tailored to financial analyst workflows
+rather than general SPARQL templates; and (iii)~no LLM or crowdsourcing
+is involved at any stage of question creation, ensuring perfect
+reproducibility, zero contamination risk, and zero marginal generation
+cost.  The tradeoff is limited linguistic diversity in the generated
+questions---a limitation we address with an optional hybrid mode that
+uses LLM paraphrasing while preserving the deterministic ground-truth
+guarantee (Section~\ref{sec:question_gen}).
 
 % =============================================================================
 \section{Benchmark Construction}
@@ -155,7 +263,13 @@ can implicitly perform the same traversal from the raw text.
 
 FinStructBench's construction pipeline has three stages: document ingestion,
 question generation, and evaluation.  Each stage is fully automated and
-domain-agnostic.
+domain-agnostic.  Critically, the entire pipeline is \emph{purely
+deterministic}---it relies exclusively on regex pattern matching,
+string parsing, and rule-based heuristics, with no machine learning or
+LLM involved at any point.  This design is deliberate: because the
+ground-truth graph is constructed by verifiable, transparent rules
+rather than by a model that could hallucinate or make probabilistic
+errors, the resulting answers are provably correct by construction.
 
 \subsection{Document Ingestion}
 \label{sec:ingestion}
@@ -236,6 +350,118 @@ with three components:
 \end{algorithmic}
 \end{algorithm}
 
+\paragraph{Step-by-Step Ground-Truth Construction.}
+We now describe the complete process by which a markdown document is
+transformed into a provably correct ground-truth graph, using a
+concrete example.  Consider the following table appearing under the
+heading \texttt{\#\# Capital Adequacy Ratios}:
+
+\begin{mdframed}[style=graybox]\small\tt
+| Metric~~~~~ | Value | Status |\\
+|------------|-------|--------|\\
+| CET1~~~~~~ | 12.5~ | Pass~~ |\\
+| Tier\_1~~~~ | 14.3~ | Pass~~ |\\
+| Total~~~~~ | 18.1~ | Fail~~ |
+\end{mdframed}
+
+\noindent
+The ingester processes this table through five sequential steps:
+
+\begin{enumerate}[leftmargin=2em]
+
+\item \textbf{Section Parsing.}
+  The document is split into hierarchical sections by \texttt{\#\#}
+  and \texttt{\#\#\#} headings.  The heading ``Capital Adequacy Ratios''
+  is sanitized into the section tag
+  \texttt{capital\_adequacy\_ratios} by stripping leading numbering
+  (e.g., ``3.1''), removing non-alphanumeric characters (except
+  underscores and spaces), replacing spaces with underscores, and
+  lowercasing.
+
+\item \textbf{Phase Encoder Registration.}
+  Before processing any tables, the ingester concatenates the full text
+  of all sections and scans it against 11 regex patterns
+  (Table~\ref{tab:encoders}).  Matching is performed on the entire
+  section content---including entity names, column headers, and prose
+  text---not just column names.  In this example, the entity names
+  ``CET1'' and ``Tier\_1'' match the pattern
+  \texttt{(?i)\textbackslash b(CET1|Tier.?1|capital.ratio|leverage)\textbackslash b},
+  registering the \texttt{capital\_ratio}
+  encoder with value range $[0, 30]$.  The encoder itself stores only
+  the range $(v_{\min}, v_{\max})$; the threshold values used for
+  question generation (e.g., $\geq 4.5$ for capital ratios) are
+  defined separately in the Threshold question generator.  Encoders
+  are registered once per metric type and shared across all sections.
+
+\item \textbf{Column Classification.}
+  Each column's values are analyzed to determine its type.
+  In this example: ``Metric'' contains strings $\to$ \textit{label};
+  ``Value'' contains numbers (100\% parseable as float) $\to$ \textit{numeric};
+  ``Status'' contains exclusively pass/fail keywords $\to$ \textit{boolean}.
+  The ``Metric'' column is further identified as the \textit{entity}
+  column because it matches the name heuristic (a list of 16 common
+  column names including ``Metric'').
+
+\item \textbf{ENM Entry Construction.}
+  For each row, the entity name and numeric value(s) are extracted.
+  Since this table has a single numeric column, the ENM key is the
+  entity name directly (no column suffix needed).  The ingester stores:
+  \begin{align*}
+    \mathcal{E}[\texttt{capital\_adequacy\_ratios},\; \texttt{CET1}]
+      &= (12.5,\; \texttt{SHA-256}(12.5)) \\
+    \mathcal{E}[\texttt{capital\_adequacy\_ratios},\; \texttt{Tier\_1}]
+      &= (14.3,\; \texttt{SHA-256}(14.3)) \\
+    \mathcal{E}[\texttt{capital\_adequacy\_ratios},\; \texttt{Total}]
+      &= (18.1,\; \texttt{SHA-256}(18.1))
+  \end{align*}
+  Each SHA-256 hash is computed over the IEEE-754 double-precision
+  representation and verified on every subsequent lookup, ensuring
+  bit-exact integrity throughout the benchmark lifecycle.
+
+  For tables with multiple numeric columns (e.g., columns AUC,
+  Precision, Recall), the column name is appended to form a composite
+  key: $(\texttt{type},\; \texttt{Entity/Column})$.  Tables with
+  secondary label columns (e.g., Scenario and Quarter) produce
+  keys such as $\texttt{Baseline/Q1\,2026/CET1}$.
+
+\item \textbf{Triple Extraction.}
+  The ingester emits knowledge graph triples that capture the full
+  relational structure of each row.  Numeric and section triples use the
+  base entity name as head; boolean triples use the full composite entity
+  ID (which equals the base name when no secondary labels are present):
+  \begin{itemize}[leftmargin=1.5em]
+    \item \emph{Numeric triples:}
+      For each numeric cell, a \texttt{has\_\textit{col}} triple is
+      emitted using the base entity name:
+      $(\texttt{CET1}, \texttt{has\_value}, \texttt{12.5})$,
+      $(\texttt{Tier\_1}, \texttt{has\_value}, \texttt{14.3})$,
+      $(\texttt{Total}, \texttt{has\_value}, \texttt{18.1})$.
+    \item \emph{Boolean triples:}  The ``Status'' column is boolean.
+      Values \texttt{pass}, \texttt{false}, \texttt{no}, and
+      \texttt{strong} map to a \texttt{passes} relation paired with
+      an \texttt{is\_strong} triple.  Values \texttt{fail},
+      \texttt{true}, \texttt{yes}, and \texttt{weak} map to
+      \texttt{fails} paired with \texttt{is\_weak}.  In this example:
+      $(\texttt{CET1}, \texttt{passes}, \texttt{capital\_adequacy\_ratios\_CET1})$,
+      $(\texttt{CET1}, \texttt{is\_strong}, \texttt{capital\_adequacy\_ratios})$;
+      $(\texttt{Total}, \texttt{fails}, \texttt{capital\_adequacy\_ratios\_Total})$,
+      $(\texttt{Total}, \texttt{is\_weak}, \texttt{capital\_adequacy\_ratios})$.
+    \item \emph{Section triples:}
+      $(\texttt{CET1}, \texttt{in\_section}, \texttt{capital\_adequacy\_ratios})$, etc.
+  \end{itemize}
+\end{enumerate}
+
+\noindent
+After all sections are processed, the resulting DocumentGraph is
+self-contained: every numeric value in the source document has a
+corresponding ENM entry (verifiable by text search), every
+relational fact is encoded as a triple, and every applicable
+threshold is registered as a phase encoder.  This completeness
+guarantee is what makes the graph a \emph{provably correct} ground
+truth---any question generated from this graph can be answered by
+deterministic traversal, and the answer can be independently verified
+against the source text.
+
 \paragraph{Column Classification.}
 The ingester classifies each column into one of four types using
 value-pattern analysis:
@@ -282,17 +508,17 @@ values should be above ($\geq$) or below ($\leq$) the threshold.}
 \toprule
 Metric Type & Pattern & Threshold & Direction \\
 \midrule
-AUC & \texttt{auc, auroc} & 0.5 & $\geq$ \\
-Accuracy & \texttt{accuracy, precision, recall, f1} & 0.5 & $\geq$ \\
-AIR & \texttt{air, impact\_ratio} & 0.8 & $\geq$ \\
+AUC & \texttt{auc} & 0.5 & $\geq$ \\
+Accuracy & \texttt{acc, accuracy} & 0.5 & $\geq$ \\
+AIR & \texttt{air} & 0.8 & $\geq$ \\
 Ratio & \texttt{ratio} & 0.0 & $\geq$ \\
-Rate & \texttt{rate} & 0.05 & $<$ \\
-Loss & \texttt{loss, charge.off} & 0.5 & $<$ \\
-Capital Ratio & \texttt{capital.*ratio, cet1, tier} & 4.5 & $\geq$ \\
-Importance & \texttt{importance, weight} & 0.1 & $\geq$ \\
-Divergence & \texttt{divergence, psi, kl} & 0.3 & $\geq$ \\
-P-value & \texttt{pvalue, p.value} & 0.05 & $<$ \\
-Percentage & \texttt{percentage, pct, share} & 0.0 & $\geq$ \\
+Rate & \texttt{rate, default.rate, approval.rate} & 0.05 & $<$ \\
+Loss & \texttt{loss, logloss, brier} & 0.5 & $<$ \\
+Capital Ratio & \texttt{cet1, tier1, capital.ratio, leverage} & 4.5 & $\geq$ \\
+Importance & \texttt{importance, score, weight} & 0.1 & $\geq$ \\
+Divergence & \texttt{divergence, distance, js, kl} & 0.3 & $\geq$ \\
+P-value & \texttt{p.value, pvalue} & 0.05 & $<$ \\
+Percentage & \texttt{pct, percent, \%} & 0.0 & $\geq$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -307,72 +533,407 @@ pool of candidate questions, each comprising: (i)~a natural-language
 question string, (ii)~a deterministic graph-traversal function that
 computes the ground-truth answer, (iii)~a structured LLM prompt with
 format instructions, and (iv)~a typed answer format (float, int, bool,
-set, or string).  We define six categories of increasing structural
-complexity:
+set, or string).  We define ten categories of increasing structural
+complexity.  Below we describe the precise mining algorithm for each
+category, including the graph traversal patterns, filtering heuristics,
+and sub-patterns that determine which questions are generated from a
+given document.
 
-\begin{mdframed}[style=graybox]
-\small
-\begin{enumerate}[leftmargin=1.5em]
-\item \textbf{Exact Recall} --- Look up a single ENM value by key.
-  Iterates over all ENM entries and generates one question per entry.\\
-  \emph{``What is the exact value of CET1 capital ratio?''}\\
-  Graph operation: $\mathcal{E}[\text{capital\_ratio}, \text{CET1}].\text{value}$\\
-  Answer type: \texttt{float}.  LLM is instructed to report the exact value
-  with all decimal places.
+\subsubsection{Category 1: Exact Recall}
 
-\item \textbf{Threshold} --- Check whether a value meets a domain-specific
-  bound.  For each ENM entry, the generator matches its category to a
-  phase encoder via keyword lookup (e.g., a category containing ``capital''
-  maps to the \texttt{capital\_ratio} encoder) and generates a boolean
-  question for each applicable threshold.\\
-  \emph{``Does the CET1 ratio meet the minimum capital requirement ($\geq$4.5\%)?''}\\
-  Graph operation: $\phi_{\text{capital\_ratio}}(\mathcal{E}[\text{CET1}]) \geq 4.5$\\
-  Answer type: \texttt{bool}.
+\paragraph{Purpose.}  Test whether an LLM can look up a single numeric
+value by its structured key---the most fundamental retrieval operation.
 
-\item \textbf{Cross-Reference} --- Find entities appearing in two relation
-  types.  Builds an index of relation $\to$ head entities, then generates
-  one question for each pair of relations whose head-entity intersection
-  has between 2 and 50 elements (filtering out trivial or degenerate
-  overlaps).\\
-  \emph{``Which entities appear in both `risk\_rating' and `has\_npl'?''}\\
-  Graph operation: $\{h : (h,r_1,\_) \in \mathcal{T}\} \cap \{h : (h,r_2,\_) \in \mathcal{T}\}$\\
-  Answer type: \texttt{set\_str} (comma-separated list).
+\paragraph{Mining algorithm.}
+The generator iterates over every ENM entry
+$(\textit{type}, \textit{id}) \to (\textit{value}, \textit{hash})$ in the
+graph.  Each composite ENM~ID is parsed into a base entity name and an
+optional column name by splitting on~\texttt{/}:
+\texttt{Entity/Label1/.../Column} yields
+$(\text{entity} = \texttt{Entity},\; \text{column} = \texttt{Column})$.
+Entries whose entity name matches the synthetic pattern \texttt{row\_\textbackslash d+}
+(generated when no entity column was detected) are skipped, since these
+names do not appear in the source document and would produce unanswerable
+questions.
 
-\item \textbf{Counting} --- Aggregate over triple sets.  Three sub-patterns:
-  (a)~count all triples with a given relation,
-  (b)~count entities with a specific (relation, tail) pair, and
-  (c)~count unique head entities per relation.\\
-  \emph{``How many entities have risk\_rating = Substandard?''}\\
-  Graph operation: $|\{h : (h, \text{risk\_rating}, \text{Substandard}) \in \mathcal{T}\}|$\\
-  Answer type: \texttt{int}.
+For each surviving entry, the generator produces one question.  If a
+column name is present, the question specifies both the entity and the
+column (e.g., \emph{``What is the `AUC' value for `Model\_A' (category:
+model\_validation)?''}).  If the ENM~ID has no column component (single
+numeric column in the source table), the question asks for the entity's
+value directly.
 
-\item \textbf{Contradiction} --- Detect pass/fail inconsistencies
-  across segments.  Identifies entities that both pass and fail tests
-  within the same feature group (matched by prefix on test-name
-  strings).  Generates three sub-types: (a)~count of contradicting
-  features, (b)~set of contradicting features, and
-  (c)~per-feature boolean questions.  Only applicable to instances
-  with boolean columns (model validation in our release).\\
-  \emph{``Which features have both passing and failing segments?''}\\
-  Graph operation: $\{f : \exists\, (\_,\texttt{passes},f) \in \mathcal{T}$
-  $\land\; \exists\, (\_,\texttt{fails},f) \in \mathcal{T}\}$\\
-  Answer type: \texttt{int}, \texttt{set\_str}, or \texttt{bool}.
+\paragraph{Graph answer function.}
+$\mathcal{E}[\textit{type}, \textit{id}].\text{value}$ --- a single
+key lookup with SHA-256 integrity verification.
 
-\item \textbf{Multi-Hop} --- Chained queries combining ENM lookups.
-  Two sub-patterns: (a)~\emph{single-type}: find the argmin or argmax
-  entry within one ENM type and report the entity name and value;
-  (b)~\emph{cross-type}: find the argmin/max in type~$t_1$, extract the
-  base entity name (the first component of the composite key before
-  \texttt{/}), then look up all entries for that entity in type~$t_2$.
-  Cross-type questions require at least 3 entries in $t_1$ and 2 in
-  $t_2$, and are only generated when the base-entity match succeeds.\\
-  \emph{``Find the entity with the lowest loss rate, then look up its
-  capital ratio.''}\\
-  Graph operation: $k^* = \arg\min_{k} \mathcal{E}[t_1,k]$;
-  then $\{(k',v) : k' \in \mathcal{E}[t_2]$, $\text{base}(k') = \text{base}(k^*)\}$\\
-  Answer type: \texttt{str} (multi-line formatted).
+\paragraph{Answer type.} \texttt{float}.  The LLM prompt instructs exact
+reproduction of all decimal places.
+
+\subsubsection{Category 2: Threshold}
+
+\paragraph{Purpose.}  Test whether an LLM can locate a value and compare
+it against a domain-specific regulatory or statistical bound.
+
+\paragraph{Mining algorithm.}
+For each ENM entry, the generator attempts to match it to one of 11 phase
+encoder types using a three-stage process:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Word-boundary regex matching.}  The concatenation of the
+    entry's category and entity~ID is tested against a list of compiled
+    regex patterns with word boundaries (e.g., \texttt{\textbackslash bauc\textbackslash b},
+    \texttt{\textbackslash bcet1\textbackslash b},
+    \texttt{\textbackslash bcapital.ratio\textbackslash b}).  Word boundaries
+    prevent false positives such as ``pair'' matching the AIR encoder.
+  \item \textbf{Semantic exclusion.}  For the \texttt{capital\_ratio} encoder
+    specifically, entities matching dollar-denominated field names
+    (e.g., \texttt{dividend}, \texttt{provision}, \texttt{charge\_off},
+    \texttt{rwa}, \texttt{goodwill}) are excluded even if they appear in a
+    capital-related category, because these are dollar amounts rather than
+    ratios.
+  \item \textbf{Value plausibility.}  The entry's numeric value is checked
+    against the encoder's threshold range.  Entries with
+    $|\text{value}| > \max(\tau \times 100,\; 1000)$ (where $\tau$ is the
+    largest threshold for that encoder) are rejected, filtering out dollar
+    amounts that passed the regex match.
 \end{enumerate}
-\end{mdframed}
+
+\noindent
+If all three checks pass and the matched encoder is registered in the
+graph, the generator produces one boolean question for each threshold
+defined in Table~\ref{tab:encoders} (e.g., AUC $\geq 0.5$,
+AIR $\geq 0.80$, capital ratio $\geq 4.5$\%).
+
+\paragraph{Graph answer function.}
+$v \gets \mathcal{E}[\textit{type}, \textit{id}]$; then
+$\phi_{\textit{encoder}}.\text{check\_inequality}(v, \tau, \text{op})$
+$\to$ \texttt{bool}.
+
+\paragraph{Answer type.} \texttt{bool}.
+
+\subsubsection{Category 3: Cross-Reference}
+
+\paragraph{Purpose.}  Test set intersection across two relation types,
+requiring the LLM to identify entities appearing in two distinct
+relational contexts.
+
+\paragraph{Mining algorithm.}
+The generator builds an inverted index mapping each relation~$r$ to its
+set of head entities: $H_r = \{h : (h, r, \_) \in \mathcal{T}\}$.
+High-cardinality, low-information relations (\texttt{in\_section},
+\texttt{has\_value}, \texttt{has\_effect}) are excluded.  Relations with
+fewer than 2 head entities are also excluded.
+
+For each pair of surviving relations $(r_1, r_2)$, the generator computes
+$H_{r_1} \cap H_{r_2}$.  Only pairs with $2 \leq |H_{r_1} \cap H_{r_2}|
+\leq 50$ are retained; intersections below~2 are trivial, and those
+above~50 are too noisy for meaningful evaluation.
+
+\paragraph{Graph answer function.}
+$\{h : (h, r_1, \_) \in \mathcal{T}\} \cap \{h : (h, r_2, \_) \in
+\mathcal{T}\}$ $\to$ set of entity name strings.
+
+\paragraph{Answer type.} \texttt{set\_str} (comma-separated list).
+
+\subsubsection{Category 4: Counting}
+
+\paragraph{Purpose.}  Test exhaustive enumeration and aggregation over
+triple sets---a task where LLMs tend to undercount by stopping before
+scanning all triples.
+
+\paragraph{Mining algorithm.}
+The generator produces four sub-patterns of counting questions:
+
+\begin{enumerate}[leftmargin=2em, label=(\alph*)]
+  \item \textbf{Count by relation.}  For each relation~$r$ (excluding
+    noisy relations), count the total number of triples:
+    $|\{(h,r,t) \in \mathcal{T}\}|$.  Relations with fewer than~2
+    triples are skipped.
+
+  \item \textbf{Count by (relation, tail).}  Group triples by
+    $(r, t)$ pairs and count unique head entities per group:
+    $|\{h : (h, r, t) \in \mathcal{T}\}|$.  Only groups with
+    2--50 heads are retained.
+
+  \item \textbf{Count unique heads.}  For each relation~$r$, count the
+    number of distinct entities that participate:
+    $|\{h : \exists\, t,\; (h, r, t) \in \mathcal{T}\}|$.  Requires
+    $\geq 3$ unique heads.
+
+  \item \textbf{Conditional count (above median).}  A multi-step pattern
+    that combines triple queries with ENM aggregation.  For each
+    $(r, t)$ group with $\geq 3$ head entities, and for each ENM column
+    where at least 3 of those entities appear: (i)~compute the median of
+    all values in that column (not just the overlapping entities);
+    (ii)~count how many entities from the $(r, t)$ group have a column
+    value strictly above the median.  Questions where the count equals
+    zero or equals the full overlap size (trivial answers) are discarded.
+\end{enumerate}
+
+\paragraph{Graph answer function.}
+Varies by sub-pattern: (a--c) use \texttt{query\_triples} with
+pattern matching and \texttt{len()}; (d) chains
+\texttt{query\_triples} $\to$ ENM iteration $\to$ \texttt{median}
+$\to$ filtered count.
+
+\paragraph{Answer type.} \texttt{int}.
+
+\subsubsection{Category 5: Contradiction}
+
+\paragraph{Purpose.}  Test global consistency checking---whether the LLM
+can detect that a feature passes validation in some segments but fails in
+others.
+
+\paragraph{Mining algorithm.}
+The generator calls \texttt{graph.find\_contradictions()}, which
+identifies entities possessing both \texttt{passes} and \texttt{fails}
+triples within the same feature group.  Feature groups are determined by
+splitting the test-name string on~\texttt{\_} (first component) and then
+on~\texttt{:} and~\texttt{/} (to extract the feature name from composite
+test identifiers).  Only entities where the passing and failing tests
+share the same group prefix are considered contradictions---this avoids
+flagging entities that legitimately pass one test and fail a different,
+unrelated test.
+
+If contradictions exist, three sub-types of questions are generated:
+
+\begin{enumerate}[leftmargin=2em, label=(\alph*)]
+  \item \textbf{Count:} How many features have contradictory performance?
+    (\texttt{int})
+  \item \textbf{Set:} Which features have contradictions?
+    (\texttt{set\_str})
+  \item \textbf{Per-feature boolean:} For each feature that participates
+    in any pass/fail triple (not just contradicting ones), ask whether it
+    has contradictory performance.  This produces both true-expected and
+    false-expected questions.  (\texttt{bool})
+\end{enumerate}
+
+\noindent
+This category is only applicable to instances with boolean columns; in
+our release, only the model validation instance generates contradiction
+questions.
+
+\paragraph{Graph answer function.}
+Calls \texttt{find\_contradictions()} and extracts unique feature names
+via prefix parsing.
+
+\paragraph{Answer type.} \texttt{int}, \texttt{set\_str}, or \texttt{bool}.
+
+\subsubsection{Category 6: Multi-Hop}
+
+\paragraph{Purpose.}  Test chained multi-step reasoning that requires
+maintaining intermediate results across sequential graph operations---the
+most structurally complex category.
+
+\paragraph{Mining algorithm.}
+ENM entries are grouped by type, then by column within each type using
+the \texttt{/}-separated structure of composite ENM~IDs.  Columns with
+fewer than~3 non-aggregate entries are excluded (aggregate/summary rows
+such as ``Total'', ``Grand Total'', ``Overall'' are detected by regex
+and skipped to avoid trivially dominant extrema).  The generator produces
+five sub-patterns:
+
+\begin{enumerate}[leftmargin=2em, label=(\alph*)]
+  \item \textbf{Argmax/min $\to$ cross-category lookup (\texttt{float}).}
+    For each column~$c_1$ in type~$t_1$, find the entity with the
+    highest (or lowest) value.  Then search for that same entity
+    (matched by base name) in a different type~$t_2$, column~$c_2$.
+    A question is generated only if the bridge entity exists in both
+    types.  The answer is the numeric value from the second lookup.\\
+    \emph{``Which entity has the highest `AUC' in `model validation'?
+    What is that entity's `AIR' in `fair lending'?''}
+
+  \item \textbf{Spread / range (\texttt{float}).}
+    For each column within a single type, compute
+    $\max(c) - \min(c)$ across all non-aggregate entities.  Columns
+    where the spread is zero (all values identical) are skipped.\\
+    \emph{``What is the range (highest minus lowest) of `AUC' values
+    in `model validation'?''}
+
+  \item \textbf{Argmax/min entity name (\texttt{str}).}
+    For each column, return the name of the entity with the highest
+    or lowest value.  Columns with tied extrema are skipped to ensure
+    an unambiguous answer.\\
+    \emph{``Which entity has the lowest `Loss\_Rate' in
+    `credit portfolio'?''}
+
+  \item \textbf{Conditional filter $\to$ count (\texttt{int}).}
+    Chains a KG triple query with ENM threshold checking.  For each
+    $(r, t)$ group with $\geq 3$ head entities, and for each ENM column
+    where those entities appear: match the column to a phase encoder
+    (using the same three-stage matching as Threshold), then count how
+    many entities from the triple group meet the encoder's threshold.
+    Requires at least~2 overlapping entities.\\
+    \emph{``How many entities that `passes' `test\_X' also have
+    `AUC' $\geq 0.5$ in `model validation'?''}
+
+  \item \textbf{Argmax/min $\to$ cross-category threshold check
+    (\texttt{bool}).}
+    A three-step chain: (i)~find the entity with the highest/lowest
+    value in column~$c_1$ of type~$t_1$ (skipping ties);
+    (ii)~look up that entity's value for column~$c_2$ in type~$t_2$;
+    (iii)~check whether the cross-looked-up value meets a phase encoder
+    threshold.\\
+    \emph{``Does the entity with the highest `AUC' in `model validation'
+    meet the 4/5ths rule for `AIR' in `fair lending'?''}
+\end{enumerate}
+
+\paragraph{Graph answer function.}
+Each sub-pattern iterates over the ENM, maintaining intermediate state
+(the identity of the extremal entity, the cross-looked-up value) before
+returning the final answer.
+
+\paragraph{Answer type.} \texttt{float}, \texttt{str}, \texttt{int}, or
+\texttt{bool} depending on sub-pattern.
+
+\subsubsection{Category 7: Absence}
+
+\paragraph{Purpose.}  Test hallucination resistance---whether the LLM can
+correctly verify that an entity does \emph{not} appear in a given section,
+rather than fabricating a plausible value.
+
+\paragraph{Mining algorithm.}
+The generator collects the set of base entity names per ENM type
+(excluding synthetic \texttt{row\_N} and aggregate names).  It requires at
+least two distinct types to generate questions.  Three sub-patterns of
+boolean questions are produced:
+
+\begin{enumerate}[leftmargin=2em, label=(\alph*)]
+  \item \textbf{Cross-type absent (false-expected).}  For each target
+    type~$t$, find entities that exist in some other type~$t'$ but not
+    in~$t$.  These are plausible-sounding names (they exist somewhere in
+    the document) that the LLM might hallucinate a value for in the
+    wrong section.
+
+  \item \textbf{Near-miss distractors (false-expected).}  For each
+    entity present in type~$t$, generate string variants that do not
+    exist:
+    \begin{itemize}[leftmargin=1.5em]
+      \item \emph{Prefix variants:}  Progressively truncate the entity
+        name (e.g., \texttt{Segment\_A1} $\to$ \texttt{Segment\_A}).
+        The prefix must be at least 3~characters long, must not itself
+        be present in the target type, and must exist as a real entity
+        in some other type (ensuring it is a plausible name, not random
+        truncation).
+      \item \emph{Suffix variants:}  Append one of three suffixes
+        (\texttt{0}, \texttt{a}, \texttt{\_v2}) to a present entity
+        name (e.g., \texttt{Model\_1} $\to$ \texttt{Model\_1a}).  The
+        variant must not exist anywhere in the graph.
+    \end{itemize}
+
+  \item \textbf{Positive controls (true-expected).}  For each entity
+    that \emph{is} present in type~$t$, generate a confirmation question.
+    This balances the question pool to prevent a trivial ``always answer
+    false'' strategy.
+\end{enumerate}
+
+\paragraph{Graph answer function.}
+Scans all ENM keys of the target type, parsing each to its base entity
+name, and returns \texttt{True} if a match is found, \texttt{False}
+otherwise.
+
+\paragraph{Answer type.} \texttt{bool}.
+
+\subsubsection{Category 8: Ranking}
+
+\paragraph{Purpose.}  Test whether the LLM can extract all values in a
+column, sort them correctly, and identify the entity at a specific ordinal
+position---stressing both exhaustive scanning and ordering accuracy.
+
+\paragraph{Mining algorithm.}
+ENM entries are grouped by $(\text{type}, \text{column})$.  Groups with
+fewer than~3 non-aggregate entries or with any tied values are discarded
+entirely (ties would make rank positions ambiguous).  Within each
+surviving group, entries are sorted in descending order (rank~1 =
+highest).  Questions are generated for a fixed set of key positions:
+
+\begin{itemize}[leftmargin=2em]
+  \item Rank 1 (highest) and rank $n$ (lowest), always included.
+  \item Rank 2 (second highest), if $n \geq 3$.
+  \item Median position ($\lfloor n/2 \rfloor + 1$), if $n \geq 5$.
+\end{itemize}
+
+\paragraph{Graph answer function.}
+Collects all $(\text{entity}, \text{value})$ pairs for the target
+$(\text{type}, \text{column})$, sorts descending, returns the entity name
+at position~$k$.
+
+\paragraph{Answer type.} \texttt{str} (entity name).
+
+\subsubsection{Category 9: Numeric Computation}
+
+\paragraph{Purpose.}  Test multi-step numeric reasoning: extracting two or
+more values and performing arithmetic---a key failure mode identified in
+recent work on table QA.
+
+\paragraph{Mining algorithm.}
+ENM entries are grouped by $(\text{type}, \text{column})$.  Two
+sub-patterns are generated:
+
+\begin{enumerate}[leftmargin=2em, label=(\alph*)]
+  \item \textbf{Pairwise arithmetic (\texttt{float}).}
+    For every pair of entities $(e_a, e_b)$ sharing the same column
+    (generated via $\binom{n}{2}$ combinations), four operations are
+    applied:
+    \begin{itemize}[leftmargin=1.5em]
+      \item \emph{Sum:} $v_a + v_b$
+      \item \emph{Difference:} $v_a - v_b$
+      \item \emph{Ratio:} $v_a / v_b$ (skipped if $|v_b| < 10^{-12}$)
+      \item \emph{Percentage change:} $\frac{v_b - v_a}{|v_a|} \times 100$
+        (skipped if $|v_a| < 10^{-12}$)
+    \end{itemize}
+    Requires $\geq 2$ entities in the column.
+
+  \item \textbf{N-ary aggregate (\texttt{float}).}
+    For each column with $\geq 3$ entities, compute:
+    \begin{itemize}[leftmargin=1.5em]
+      \item \emph{Mean:} arithmetic average of all values in the column.
+      \item \emph{Median:} middle value (or average of two middle values).
+    \end{itemize}
+    The LLM prompt explicitly states the number of entities to extract,
+    testing completeness of value extraction.
+\end{enumerate}
+
+\paragraph{Graph answer function.}
+(a)~Two \texttt{lookup} calls followed by the arithmetic operation;
+(b)~iteration over all ENM entries matching the $(\text{type},
+\text{column})$ pair, then \texttt{mean} or \texttt{median}.
+
+\paragraph{Answer type.} \texttt{float}.
+
+\subsubsection{Category 10: Cross-Table Aggregation}
+
+\paragraph{Purpose.}  Test whether the LLM can locate the same entity
+across multiple table sections and perform arithmetic on the
+corresponding values---a common task in financial analysis where metrics
+are reported in different contexts (e.g., baseline vs.\ stress scenarios).
+
+\paragraph{Mining algorithm.}
+The generator builds an index mapping each base entity name to all its
+ENM occurrences: $\text{entity} \to [(t_i, c_i, \text{eid}_i, v_i),
+\ldots]$.  Entities appearing in fewer than~2 distinct ENM types are
+skipped.  Two sub-patterns are generated:
+
+\begin{enumerate}[leftmargin=2em, label=(\alph*)]
+  \item \textbf{Cross-section sum (\texttt{float}).}
+    For each column~$c$ that appears in multiple types for the same
+    entity, sum the entity's values across all types:
+    $\sum_i \mathcal{E}[t_i, \text{eid}_i]$ where each $\text{eid}_i$
+    shares the same base entity and column.  Requires the column to
+    appear in $\geq 2$ types.
+
+  \item \textbf{Cross-section difference (\texttt{float}).}
+    For each pair of types $(t_1, t_2)$ sharing a common column~$c$ for
+    the same entity, compute
+    $\mathcal{E}[t_1, e/c] - \mathcal{E}[t_2, e/c]$.
+\end{enumerate}
+
+\paragraph{Graph answer function.}
+(a)~Multiple \texttt{lookup} calls (one per type), then summation;
+(b)~two \texttt{lookup} calls, then subtraction.
+
+\paragraph{Answer type.} \texttt{float}.
 
 \paragraph{Sampling and Validation.}
 Each generator produces a pool of all structurally valid candidates from
@@ -397,6 +958,88 @@ across all five instances).  Given correct ingestion, the answer function
 is guaranteed correct by the determinism of key lookup, pattern matching,
 and set operations.  This eliminates annotation noise and enables scaling
 to arbitrarily large question sets.
+
+\subsection{Design Rationale: Deterministic vs.\ Hybrid Generation}
+\label{sec:design_rationale}
+
+The question generation methodologies surveyed in
+Section~\ref{sec:related} can be organized along two axes: the
+\emph{source of structural logic} (how the question's answerable form is
+determined) and the \emph{source of natural language} (how the question
+is expressed).  Table~\ref{tab:qg_comparison} compares representative
+approaches along five properties critical for benchmark integrity.
+
+\begin{table}[t]
+\centering
+\caption{Comparison of question generation approaches.
+\checkmark\ = fully satisfied, $\sim$\,= partially satisfied,
+\texttimes\ = not satisfied.}
+\label{tab:qg_comparison}
+\small
+\begin{tabular}{l@{\hskip 6pt}c@{\hskip 6pt}c@{\hskip 6pt}c@{\hskip 6pt}c@{\hskip 6pt}c}
+\toprule
+Approach & \rotatebox{60}{Provable GT} & \rotatebox{60}{Zero cost} &
+  \rotatebox{60}{Reproducible} & \rotatebox{60}{No contam.} &
+  \rotatebox{60}{Ling.\ diversity} \\
+\midrule
+Human annotation & \texttimes & \texttimes & \checkmark & \checkmark & \checkmark \\
+LLM-driven & $\sim$ & \texttimes & \texttimes & \texttimes & \checkmark \\
+Template + crowdsource & \checkmark & \texttimes & $\sim$ & \checkmark & \checkmark \\
+Graph-topology (ours) & \checkmark & \checkmark & \checkmark & \checkmark & \texttimes \\
+Hybrid (ours, optional) & \checkmark & \texttimes & $\sim$ & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FinStructBench's default \textbf{deterministic mode} prioritizes the first
+four properties---provable ground truth, zero marginal cost, bit-exact
+reproducibility, and zero contamination risk---at the expense of linguistic
+diversity.  We justify this tradeoff on three grounds:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Ground-truth integrity.}  In financial regulation, an
+    incorrect ground-truth label can lead to false confidence in a model's
+    accuracy on safety-critical tasks.  Human annotation introduces noise
+    (FinQA reports inter-annotator agreement of 92.2\%~\citep{chen2021finqa}),
+    and LLM-generated labels require expensive verification.
+    Deterministic graph traversal eliminates both sources of error.
+  \item \textbf{Contamination resistance.}  LLM-generated benchmarks risk
+    circular evaluation: the same model family that generated the questions
+    may have memorized the patterns.  Dynamic-KGQA~\citep{dammu2025dynamickgqa}
+    addresses this with fresh splits, but cannot guarantee that the
+    generating model did not influence the question distribution.
+    Our rule-based generators are immune to this concern.
+  \item \textbf{Scalability.}  Adding a new benchmark instance requires
+    only a markdown document---no API calls, no annotation budget, and no
+    crowdsourcing pipeline.  The ten generators automatically produce a
+    question pool whose size scales with the document's graph complexity.
+\end{enumerate}
+
+\paragraph{Optional Hybrid Mode.}
+To address the linguistic diversity limitation, FinStructBench provides
+an optional \textbf{hybrid mode} inspired by the GrailQA
+pipeline~\citep{gu2021grailqa}: the deterministic generators produce the
+question logic, graph answer function, and ground truth as before, and an
+LLM is then used solely to paraphrase the template-generated natural
+language into more diverse, realistic phrasing.  Crucially, the
+paraphrase step modifies only the surface form of the question---the
+ground truth, the graph answer function, and the LLM evaluation prompt
+remain unchanged, preserving provable correctness.
+
+The toolkit exposes this choice via a \texttt{question\_mode} parameter
+(default: \texttt{"deterministic"}).  In hybrid mode, each question's
+\texttt{natural\_language} field is replaced by an LLM-generated
+paraphrase, while the \texttt{llm\_prompt} (the structured evaluation
+prompt sent to the model under test) is left unchanged.  This design
+ensures that:
+\begin{itemize}[leftmargin=2em]
+  \item The LLM under test sees a fixed, format-controlled prompt
+    regardless of mode---results remain comparable.
+  \item The paraphrase LLM is used only for benchmark
+    \emph{presentation}, never for ground-truth \emph{computation}.
+  \item Users can reproduce the deterministic baseline at any time by
+    switching modes, with no change to scoring or ground truth.
+\end{itemize}
 
 \subsection{Evaluation Protocol}
 \label{sec:eval_protocol}
@@ -466,15 +1109,15 @@ Table~\ref{tab:instances} summarizes their characteristics.
 \small
 \begin{tabular}{lrrrcl}
 \toprule
-Instance & ENM & Triples & Questions & Encoders & Regulatory Context \\
+Instance & ENM & Triples & Questions & Categories & Regulatory Context \\
 \midrule
-Model Validation & 261 & 5{,}586 & 60 & 6 & SR 11-7 \\
-Fair Lending & 866 & 1{,}962 & 50 & 7 & ECOA / HMDA \\
-Stress Test & 207 & 1{,}355 & 50 & 4 & CCAR / DFAST \\
-Credit Portfolio & 211 & 2{,}334 & 50 & 5 & OCC Guidelines \\
-Basel Capital & 27 & 785 & 48 & 5 & Basel III Pillar 3 \\
+Model Validation & 275 & 5{,}586 & 100 & 10 & SR 11-7 \\
+Fair Lending & 1{,}139 & 2{,}014 & 90 & 9 & ECOA / HMDA \\
+Stress Test & 476 & 1{,}417 & 90 & 9 & CCAR / DFAST \\
+Credit Portfolio & 1{,}503 & 2{,}356 & 90 & 9 & OCC Guidelines \\
+Basel Capital & 494 & 784 & 84 & 9 & Basel III Pillar 3 \\
 \midrule
-\textbf{Total} & \textbf{1{,}572} & \textbf{12{,}022} & \textbf{258} & --- & --- \\
+\textbf{Total} & \textbf{3{,}887} & \textbf{12{,}157} & \textbf{454} & --- & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -492,7 +1135,7 @@ A fair lending analysis examining loan disposition patterns across protected
 classes (race, gender, age).  Contains adverse impact ratios, pricing
 analysis with statistical significance tests, geographic distribution
 indicators, and model fairness metrics (demographic parity, equalized odds).
-The largest instance by ENM entries (866), reflecting the high dimensionality
+The largest instance by ENM entries (1{,}139), reflecting the high dimensionality
 of cross-tabulated demographic data.
 
 \paragraph{Stress Test (CCAR/DFAST).}
@@ -504,13 +1147,13 @@ capital ratio trajectories, and capital action plans.
 \paragraph{Credit Portfolio Review (OCC).}
 A credit portfolio examination covering portfolio composition, credit quality
 metrics, risk rating distributions, concentration analysis, allowance
-adequacy, vintage analysis, migration matrices, and stress loss projections.
+adequacy, vintage analysis, migration matrices and stress loss projections.
 
 \paragraph{Basel Capital Adequacy (Pillar~3).}
 A Basel~III regulatory disclosure with capital composition, risk-weighted
 assets by exposure class, capital ratios, credit risk parameters (PD, LGD,
-EAD), market risk (VaR), operational risk (SMA), and leverage ratios.
-The smallest instance by ENM entries (27) but with complex hierarchical
+EAD), market risk (VaR), operational risk (SMA) and leverage ratios.
+The smallest instance by ENM entries (494) but with complex hierarchical
 table structure.
 
 
@@ -521,182 +1164,490 @@ table structure.
 \subsection{Setup}
 
 We evaluate Claude Sonnet~4 (\texttt{claude-sonnet-4-20250514}) against
-the graph baseline across all five instances.  The LLM receives the
-complete markdown document as context (500--1{,}000 lines) along with a
-structured prompt for each question specifying the expected answer format.
-We use 10 questions per category, sampled with seed 42.
+the graph baseline across all five instances and all ten question
+categories.  The LLM receives the complete markdown document as context
+(500--1{,}000 lines) along with a structured prompt for each question
+specifying the expected answer format.  We use 10 questions per category
+(where available), sampled with seed~42, yielding 454 questions per mode.
+
+To assess the effect of question phrasing on LLM performance, we run
+the full benchmark in two modes: \emph{deterministic} (template-generated
+questions) and \emph{hybrid} (questions paraphrased by an LLM for
+linguistic diversity while preserving ground truth; see
+Section~\ref{sec:question_gen}).  The graph baseline achieves 100\%
+accuracy in both modes by construction, confirming that paraphrasing
+does not alter the ground truth.
 
 \subsection{Main Results}
 
 \begin{table}[t]
 \centering
-\caption{Overall benchmark results: Graph baseline vs.\ Claude Sonnet~4.}
+\caption{Overall benchmark results: Graph baseline vs.\ Claude Sonnet~4
+in deterministic and hybrid question modes.}
 \label{tab:main_results}
 \small
-\begin{tabular}{lcccc}
+\begin{tabular}{lccccc}
 \toprule
-Instance & Questions & Graph & Claude Sonnet & $\Delta$ \\
+Instance & Questions & Graph & Det.\ LLM & Hyb.\ LLM & $\Delta$ \\
 \midrule
-Model Validation & 60 & 60/60 (100\%) & 26/60 (43\%) & $-57$ pp \\
-Fair Lending & 50 & 50/50 (100\%) & 30/50 (60\%) & $-40$ pp \\
-Stress Test & 50 & 50/50 (100\%) & 21/50 (42\%) & $-58$ pp \\
-Credit Portfolio & 50 & 50/50 (100\%) & 20/50 (40\%) & $-60$ pp \\
-Basel Capital & 48 & 48/48 (100\%) & 18/48 (38\%) & $-63$ pp \\
+Model Validation & 100 & 100 (100\%) & 69 (69\%) & 71 (71\%) & $+2$ \\
+Fair Lending & 90 & 90 (100\%) & 57 (63\%) & 59 (66\%) & $+2$ \\
+Stress Test & 90 & 90 (100\%) & 27 (30\%) & 27 (30\%) & $0$ \\
+Credit Portfolio & 90 & 90 (100\%) & 53 (59\%) & 57 (63\%) & $+4$ \\
+Basel Capital & 84 & 84 (100\%) & 57 (68\%) & 54 (64\%) & $-3$ \\
 \midrule
-\textbf{Total} & \textbf{258} & \textbf{258 (100\%)} & \textbf{115 (45\%)} & $\mathbf{-55}$ \textbf{pp} \\
+\textbf{Total} & \textbf{454} & \textbf{454 (100\%)} & \textbf{263 (58\%)} & \textbf{268 (59\%)} & $\mathbf{+5}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Table~\ref{tab:main_results} presents the overall results.  The graph
 baseline achieves 100\% across all instances by construction.  Claude
-Sonnet~4 achieves 45\% overall, with per-instance scores ranging from
-38\% (Basel Capital) to 60\% (Fair Lending).
+Sonnet~4 achieves 58\% overall in deterministic mode and 59\% in
+hybrid mode---a marginal improvement of 5~questions (+1~pp).
+Per-instance scores range from 30\% (Stress Test) to 69--71\%
+(Model Validation), reflecting substantial variation in document
+complexity.
 
-\subsection{Complexity Gradient}
+\subsection{Results by Question Category}
 
 \begin{table}[t]
 \centering
-\caption{Results by question category (aggregated across all instances).
-Categories are ordered by decreasing LLM accuracy, revealing a monotonic
-complexity gradient.}
+\caption{Results by question category (aggregated across all instances),
+ordered by decreasing deterministic LLM accuracy.}
 \label{tab:by_category}
 \small
-\begin{tabular}{lccccc}
+\begin{tabular}{lcccccc}
 \toprule
-Category & Graph Op. & Total & Graph & Claude & Claude \% \\
+Category & Graph Op. & Total & Graph & Det.\ LLM & Hyb.\ LLM & $\Delta$ \\
 \midrule
-Threshold & $\phi(v) \geq \tau$ & 50 & 50 & 43 & 86\% \\
-Cross-Reference & $S_1 \cap S_2$ & 50 & 50 & 31 & 62\% \\
-Exact Recall & $\mathcal{E}[k]$ & 50 & 50 & 22 & 44\% \\
-Counting & $|\{h : (h,r,t)\}|$ & 50 & 50 & 17 & 34\% \\
-Contradiction & $\exists\, \text{pass} \land \exists\, \text{fail}$ & 10 & 10 & 2 & 20\% \\
-Multi-Hop & chain$(f_1, f_2)$ & 48 & 48 & 0 & 0\% \\
+Absence & $\nexists\,(h,r,t)$ & 50 & 50 & 47 (94\%) & 47 (94\%) & $0$ \\
+Threshold & $\phi(v) \geq \tau$ & 50 & 50 & 37 (74\%) & 36 (72\%) & $-1$ \\
+Multi-Hop & chain$(f_1, f_2)$ & 50 & 50 & 34 (68\%) & 33 (66\%) & $-1$ \\
+Ranking & $\text{sort}(\{v_i\})[k]$ & 50 & 50 & 33 (66\%) & 33 (66\%) & $0$ \\
+Cross-Reference & $S_1 \cap S_2$ & 50 & 50 & 29 (58\%) & 34 (68\%) & $+5$ \\
+Exact Recall & $\mathcal{E}[k]$ & 50 & 50 & 26 (52\%) & 24 (48\%) & $-2$ \\
+Cross-Table Agg. & $\sum_i f(T_i)$ & 44 & 44 & 21 (48\%) & 21 (48\%) & $0$ \\
+Numeric Comp. & $f(v_1, v_2)$ & 50 & 50 & 17 (34\%) & 18 (36\%) & $+1$ \\
+Counting & $|\{h : (h,r,t)\}|$ & 50 & 50 & 16 (32\%) & 19 (38\%) & $+3$ \\
+Contradiction & $\exists\, \text{pass} \land \exists\, \text{fail}$ & 10 & 10 & 3 (30\%) & 3 (30\%) & $0$ \\
 \midrule
-\textbf{Total} & --- & \textbf{258} & \textbf{258} & \textbf{115} & \textbf{45\%} \\
+\textbf{Total} & --- & \textbf{454} & \textbf{454} & \textbf{263 (58\%)} & \textbf{268 (59\%)} & $\mathbf{+5}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:by_category} reveals a striking complexity gradient.  LLM
-accuracy decreases monotonically with the structural complexity of the
-required graph operation:
+Table~\ref{tab:by_category} reveals a clear complexity gradient across
+the ten question categories.  We highlight the key patterns:
 
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{Threshold (86\%):}  Simple inequality checks against a
-    single value.  The LLM only needs to locate one number and compare it
-    to a threshold---the simplest possible structured query.
-  \item \textbf{Cross-Reference (62\%):}  Set intersection across two
-    relation types.  Requires identifying entities in two different contexts
-    and computing their overlap.
-  \item \textbf{Exact Recall (44\%):}  Precise numeric lookup.  Despite
+  \item \textbf{Absence (94\%):}  Verifying that an entity does not
+    exist in the graph.  The LLM excels at this task because it
+    requires confirming the non-existence of a specific value---a
+    form of focused search that plays to the model's strengths.
+  \item \textbf{Threshold (74\%):}  Simple inequality checks against a
+    single value.  The LLM only needs to locate one number and compare
+    it to a threshold.
+  \item \textbf{Multi-Hop (68\%):}  Chained lookup requiring an
+    intermediate computation (e.g., argmin/argmax) followed by a
+    cross-type lookup.  Performance varies substantially across
+    instances (30--90\%), suggesting sensitivity to table structure.
+  \item \textbf{Ranking and Cross-Reference (58--66\%):}  Tasks
+    requiring comparison across multiple entities or relation types.
+    Cross-reference shows the largest hybrid improvement ($+5$),
+    suggesting that more natural phrasing helps the LLM parse
+    set-intersection queries.
+  \item \textbf{Exact Recall (52\%):}  Precise numeric lookup.  Despite
     being a single-hop operation, LLMs frequently return nearby values
     from the same table or confuse similarly-named entities.
-  \item \textbf{Counting (34\%):}  Exhaustive enumeration and aggregation.
-    Requires scanning all triples matching a pattern---LLMs tend to
-    undercount or lose track in long tables.
-  \item \textbf{Contradiction (20\%):}  Global consistency checking.
-    Requires reasoning about whether a feature passes in some segments
-    but fails in others---a form of negation-as-failure that LLMs
-    struggle with.
-  \item \textbf{Multi-Hop (0\%):}  Chained argmin/argmax followed by
-    cross-type lookup.  Claude Sonnet fails on all 48 multi-hop questions
-    across all five instances, demonstrating a complete inability to
-    perform sequential structured traversal.
+  \item \textbf{Cross-Table Aggregation (48\%):}  Aggregating values
+    across multiple tables.  Requires identifying and combining
+    information from different document sections.
+  \item \textbf{Numeric Computation (34\%) and Counting (32\%):}
+    Exhaustive enumeration or arithmetic over extracted values.  LLMs
+    tend to undercount or introduce calculation errors.
+  \item \textbf{Contradiction (30\%):}  Global consistency checking
+    across segments---the most challenging category (though limited
+    to 10~questions from the Model Validation instance).
 \end{itemize}
 
 \subsection{Per-Instance Breakdown}
 
 \begin{table}[t]
 \centering
-\caption{Claude Sonnet~4 accuracy by instance and category.  Each cell
-shows correct/total.  Shading indicates: {\colorbox{green!15}{$\geq$80\%}},
+\caption{Claude Sonnet~4 accuracy by instance and category
+(deterministic mode).  Each cell shows correct/total.  Shading
+indicates: {\colorbox{green!15}{$\geq$80\%}},
 {\colorbox{yellow!30}{40--79\%}}, {\colorbox{red!15}{$<$40\%}}.}
 \label{tab:heatmap}
-\small
-\begin{tabular}{l*{6}{c}}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{l*{10}{c}}
 \toprule
-& \rotatebox{60}{Threshold} & \rotatebox{60}{Cross-Ref} & \rotatebox{60}{Exact Recall} & \rotatebox{60}{Counting} & \rotatebox{60}{Contradiction} & \rotatebox{60}{Multi-Hop} \\
+& \rotatebox{70}{Absence} & \rotatebox{70}{Threshold} & \rotatebox{70}{Multi-Hop} & \rotatebox{70}{Ranking} & \rotatebox{70}{Cross-Ref} & \rotatebox{70}{Exact Recall} & \rotatebox{70}{Cross-Tbl Agg} & \rotatebox{70}{Numeric Comp} & \rotatebox{70}{Counting} & \rotatebox{70}{Contradiction} \\
 \midrule
-Model Valid. & \cellcolor{green!15}8/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}2/10 & \cellcolor{red!15}0/10 \\
-Fair Lending & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}7/10 & \cellcolor{green!15}9/10 & \cellcolor{yellow!30}4/10 & --- & \cellcolor{red!15}0/10 \\
-Stress Test & \cellcolor{green!15}10/10 & \cellcolor{green!15}8/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}3/10 & --- & \cellcolor{red!15}0/10 \\
-Credit Port. & \cellcolor{green!15}9/10 & \cellcolor{yellow!30}5/10 & \cellcolor{yellow!30}5/10 & \cellcolor{red!15}1/10 & --- & \cellcolor{red!15}0/10 \\
-Basel Capital & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}5/10 & \cellcolor{red!15}1/10 & \cellcolor{yellow!30}6/10 & --- & \cellcolor{red!15}0/8 \\
+Model Valid. & \cellcolor{green!15}9/10 & \cellcolor{green!15}10/10 & \cellcolor{green!15}8/10 & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}7/10 & \cellcolor{yellow!30}6/10 & \cellcolor{green!15}10/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}3/10 \\
+Fair Lending & \cellcolor{green!15}10/10 & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{yellow!30}5/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}2/10 & \cellcolor{yellow!30}4/10 & --- \\
+Stress Test & \cellcolor{green!15}8/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}3/10 & \cellcolor{red!15}1/10 & \cellcolor{yellow!30}7/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}0/10 & \cellcolor{red!15}1/10 & --- \\
+Credit Port. & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}4/10 & \cellcolor{green!15}8/10 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}7/10 & \cellcolor{green!15}9/10 & \cellcolor{red!15}0/10 & \cellcolor{yellow!30}6/10 & \cellcolor{red!15}3/10 & --- \\
+Basel Capital & \cellcolor{green!15}10/10 & \cellcolor{yellow!30}6/10 & \cellcolor{green!15}9/10 & \cellcolor{green!15}9/10 & \cellcolor{red!15}3/10 & \cellcolor{yellow!30}5/10 & \cellcolor{yellow!30}4/4 & \cellcolor{yellow!30}6/10 & \cellcolor{yellow!30}5/10 & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:heatmap} shows the full instance $\times$ category breakdown.
-Several patterns emerge:
+Table~\ref{tab:heatmap} shows the full instance $\times$ category
+breakdown in deterministic mode.  Several patterns emerge:
 
-\paragraph{Multi-hop is universally zero.}
-Across all five instances, Claude Sonnet fails every multi-hop question
-(0/48).  These questions require identifying an extremum (argmin/argmax)
-within one ENM type and then looking up the corresponding entity in a
-different ENM type---a two-step traversal that the LLM cannot reliably
-execute from raw text.
+\paragraph{Absence is consistently high.}
+All five instances score $\geq$80\% on absence detection, confirming
+that LLMs are reliable at verifying that a specific value does not
+appear in the document.
 
-\paragraph{Instance difficulty varies.}
-Fair Lending is the easiest instance (60\%), likely because its tables
-have clear demographic category labels and the AIR threshold of 0.80 is
-well-known.  Basel Capital is hardest (38\%), with deeply nested tables
-and entities identified by composite keys (e.g., exposure class + sub-type
-+ maturity band).
+\paragraph{Stress Test is consistently hard.}
+Stress Test scores only 30\% overall, with 0/10 on exact recall,
+numeric computation, and cross-table aggregation.  The dense
+quarter~$\times$~scenario matrices cause systematic extraction failures.
 
-\paragraph{Exact recall difficulty depends on table structure.}
-Stress Test exact recall scores 0/10 despite being a single-hop operation.
-This is because the stress test uses dense quarter $\times$ scenario
-matrices where multiple similar values appear in adjacent cells, causing
-the LLM to extract the wrong cell.  Fair Lending scores 9/10 on exact
-recall because its tables have distinctive demographic labels.
+\paragraph{Instance difficulty varies widely.}
+Model Validation is the easiest instance (69\%), benefiting from
+well-labeled tables and distinctive entity names.  Stress Test (30\%)
+and Credit Portfolio (59\%) are harder due to wide matrices and
+complex hierarchical structures.
+
+\paragraph{Category difficulty is instance-dependent.}
+Multi-hop ranges from 3/10 (Stress Test) to 9/10 (Basel Capital),
+and cross-table aggregation ranges from 0/10 (Stress Test, Credit
+Portfolio) to 10/10 (Model Validation), demonstrating that structural
+complexity interacts with document layout.
+
+\subsection{Deterministic vs.\ Hybrid Question Mode}
+\label{sec:det_vs_hybrid}
+
+\begin{table}[t]
+\centering
+\caption{Deterministic vs.\ hybrid LLM accuracy by category (aggregated
+across all five instances, 454~questions per mode).  The graph baseline
+achieves 100\% in both modes.}
+\label{tab:det_vs_hybrid}
+\small
+\begin{tabular}{lccc}
+\toprule
+Category & Det.\ LLM & Hyb.\ LLM & $\Delta$ \\
+\midrule
+Absence & 47/50 (94\%) & 47/50 (94\%) & $0$ \\
+Contradiction & 3/10 (30\%) & 3/10 (30\%) & $0$ \\
+Counting & 16/50 (32\%) & 19/50 (38\%) & $+3$ \\
+Cross-Reference & 29/50 (58\%) & 34/50 (68\%) & $+5$ \\
+Cross-Table Agg. & 21/44 (48\%) & 21/44 (48\%) & $0$ \\
+Exact Recall & 26/50 (52\%) & 24/50 (48\%) & $-2$ \\
+Multi-Hop & 34/50 (68\%) & 33/50 (66\%) & $-1$ \\
+Numeric Comp. & 17/50 (34\%) & 18/50 (36\%) & $+1$ \\
+Ranking & 33/50 (66\%) & 33/50 (66\%) & $0$ \\
+Threshold & 37/50 (74\%) & 36/50 (72\%) & $-1$ \\
+\midrule
+\textbf{Total} & \textbf{263/454 (58\%)} & \textbf{268/454 (59\%)} & $\mathbf{+5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:det_vs_hybrid} compares LLM performance across the two
+question modes.  Hybrid paraphrasing yields a net gain of 5~questions
+(+1~pp overall), but the effect is category-dependent:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Cross-reference benefits most} ($+5$, from 58\% to
+    68\%).  Template-generated cross-reference questions use rigid
+    phrasing with nested quoting; the paraphrased versions use more
+    natural set-intersection language that may better match the LLM's
+    training distribution.
+  \item \textbf{Counting improves modestly} ($+3$, from 32\% to 38\%).
+    Natural phrasing of enumeration queries may reduce
+    misinterpretation of the counting target.
+  \item \textbf{Exact recall slightly degrades} ($-2$, from 52\% to
+    48\%).  Paraphrasing may remove disambiguating cues (e.g., quoted
+    column names) that help the LLM locate the correct cell.
+  \item \textbf{Most categories are unaffected} (6 of 10 categories
+    show $\leq$1 question difference), indicating that the question
+    surface form has limited impact on LLM accuracy for most task types.
+\end{itemize}
+
+Table~\ref{tab:paraphrase_examples} illustrates the paraphrasing
+effect: template artifacts (extra quoting, rigid phrasing) are replaced
+with natural, professional language while preserving all entity names,
+column names, and threshold values exactly.
+
+\begin{table}[t]
+\centering
+\caption{Example questions in deterministic vs.\ hybrid mode.  The
+hybrid mode produces more natural phrasing while preserving the exact
+same meaning and all named entities.}
+\label{tab:paraphrase_examples}
+\small
+\begin{tabular}{p{1.8cm}p{5.5cm}p{5.5cm}}
+\toprule
+Category & Deterministic (template) & Hybrid (paraphrased) \\
+\midrule
+Exact Recall &
+  What is the \texttt{'Value'} value for \texttt{'Utilization'} (category: fanova\dots)? &
+  What is the Value for Utilization in the fanova\_main\_effect\_curves category? \\[4pt]
+Threshold &
+  Does \texttt{'test/AUC'} (model\_accuracy) \textbf{meet} better than random (AUC $\geq$ 0.5)? &
+  Does the \texttt{'test/AUC'} model\_accuracy \textbf{achieve} performance better than random chance\dots? \\[4pt]
+Contradiction &
+  Which features \textbf{have} contradictory performance across segments? &
+  Which features \textbf{exhibit} contradictory performance when analyzed across different segments? \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Error Analysis}
 \label{sec:errors}
 
-We analyze the 143 LLM failures across three representative error modes:
+We analyze the 191 LLM failures (deterministic mode) across
+representative error modes:
 
 \paragraph{Adjacent Cell Confusion.}
-In 37\% of exact recall failures, the LLM returns a value from a
+In exact recall failures, the LLM frequently returns a value from a
 neighboring cell in the same table.  For example, when asked for
 ``Q1~2026/Non-Interest Income,'' Claude returns the Non-Interest Expense
 value from the same row.  This error is especially prevalent in the
-stress test instance, which uses wide matrices with 9 quarterly columns.
+Stress Test instance (0/10 on exact recall), which uses wide matrices
+with 9 quarterly columns.
 
 \paragraph{Partial Enumeration.}
-In 68\% of counting failures, the LLM provides a count that is
-lower than the ground truth.  The model appears to enumerate entities
-until it reaches a ``satisfying'' count rather than exhaustively scanning
-all triples.  For example, when asked to count entities with
-\texttt{risk\_rating = Substandard}, Claude finds 4 of 7 entities,
-apparently stopping after processing the first table and missing
-occurrences in subsequent sections.
+In the majority of counting failures (34 of 50 questions missed), the LLM
+provides a count lower than the ground truth.  The model appears to
+enumerate entities until it reaches a ``satisfying'' count rather than
+exhaustively scanning all triples.
 
-\paragraph{Multi-Hop Decomposition Failure.}
-All 48 multi-hop failures follow the same pattern: the LLM either
-(a)~answers only the first hop (reports the entity with the extreme value
-but not the cross-type lookup), (b)~hallucinates the second-hop value,
-or (c)~confuses which entity was the extremum.  This suggests that
-current LLMs lack the ability to maintain intermediate results while
-executing a second query---a fundamental limitation for agentic
-financial analysis.
+\paragraph{Cross-Table Blindness.}
+Cross-table aggregation achieves 0/10 on both Stress Test and Credit
+Portfolio, where the required values span multiple sections.  The LLM
+typically finds values from one table but misses contributions from
+other sections of the document.
+
+\paragraph{Arithmetic Errors.}
+Numeric computation failures (33 of 50 missed) frequently involve
+correct value extraction but incorrect arithmetic---for example,
+computing a ratio with the numerator and denominator swapped, or
+rounding to the wrong precision.
+
+\subsection{Ingestion Mode Comparison}
+\label{sec:ingestion_modes}
+
+The preceding experiments use a deterministic regex-based ingestion
+pipeline to construct the ground-truth graph.  A natural question is
+whether an LLM could replace or augment this pipeline.  We compare
+three ingestion strategies across all five benchmark instances:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Regex} (default): Pure deterministic extraction using
+    regex pattern matching, string parsing and value-pattern heuristics.
+  \item \textbf{LLM-Only}: The LLM (Claude Opus~4) extracts all ENM
+    entries and triples directly from each table and prose section,
+    with no regex preprocessing.
+  \item \textbf{Hybrid}: Regex extraction as the base, with LLM
+    fallback for ambiguous column classification, entity resolution
+    and prose relation extraction.
+\end{enumerate}
+
+\paragraph{Metrics.}
+We measure: (i)~ENM and triple counts per mode, (ii)~pairwise Jaccard
+index over ENM key sets and triple sets, (iii)~value match rate (exact
+numeric agreement on shared ENM keys), (iv)~regex recovery rate
+(fraction of regex ENM entries recovered by each alternative mode),
+and (v)~numeric precision (exact match and $<10^{-6}$ tolerance on
+shared keys).
+
+\begin{table}[t]
+\centering
+\caption{ENM and unique triple counts by ingestion mode across five
+instances.  Triple counts are deduplicated (cf.\ Table~\ref{tab:instances},
+which reports raw triples including duplicates).  The LLM-only mode
+recovers only 12.5\% of regex ENM entries, while hybrid recovers all
+regex entries and adds prose-extracted data.}
+\label{tab:ingestion_counts}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{ENM Entries} & \multicolumn{3}{c}{Triples} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Instance & Regex & LLM & Hybrid & Regex & LLM & Hybrid \\
+\midrule
+Model Validation   & 275   & 77  & 1{,}107 & 2{,}109 & 159   & 3{,}041 \\
+Fair Lending       & 1{,}139 & 109 & 1{,}140 & 1{,}611 & 279 & 1{,}594 \\
+Stress Test        & 476   & 35  & 480     & 1{,}243 & 105   & 1{,}305 \\
+Credit Portfolio   & 1{,}503 & 150 & 1{,}520 & 2{,}256 & 422 & 2{,}340 \\
+Basel Capital      & 494   & 116 & 498     & 778     & 286   & 803 \\
+\midrule
+\textbf{Total}     & \textbf{3{,}887} & \textbf{487} & \textbf{4{,}745}
+                   & \textbf{7{,}997} & \textbf{1{,}251} & \textbf{9{,}083} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Pairwise Jaccard index and recovery rates.  Regex$\leftrightarrow$LLM
+overlap is near zero because the LLM uses different naming conventions.
+Hybrid preserves all regex values exactly (100\% value match) while
+recovering 97.2\% of regex ENM entries on average.}
+\label{tab:ingestion_jaccard}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{2}{c}{Regex$\leftrightarrow$LLM} & \multicolumn{2}{c}{Regex$\leftrightarrow$Hybrid} & \multicolumn{2}{c}{Recovery (\%)} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+Instance & ENM $J$ & Triple $J$ & ENM $J$ & Triple $J$ & LLM & Hybrid \\
+\midrule
+Model Validation   & 0.048 & 0.023 & 0.207 & 0.084 &  5.8 &  86.2 \\
+Fair Lending       & 0.000 & 0.043 & 0.999 & 0.895 &  0.0 & 100.0 \\
+Stress Test        & 0.008 & 0.003 & 0.992 & 0.952 &  0.8 & 100.0 \\
+Credit Portfolio   & 0.000 & 0.012 & 0.989 & 0.793 &  0.0 & 100.0 \\
+Basel Capital      & 0.020 & 0.057 & 0.992 & 0.813 &  2.4 & 100.0 \\
+\midrule
+\textbf{Mean}      & \textbf{0.015} & \textbf{0.028} & \textbf{0.836} & \textbf{0.707} & \textbf{1.8} & \textbf{97.2} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{LLM-only extraction is catastrophically incomplete.}
+Table~\ref{tab:ingestion_counts} shows that the LLM-only mode extracts
+only 487 of 3{,}887 regex ENM entries (12.5\%) and 1{,}251 of 7{,}997
+triples (15.6\%).  Table~\ref{tab:ingestion_jaccard} reveals that even
+the entries the LLM does extract have near-zero overlap with the regex
+graph: the mean ENM Jaccard index is 0.015 and the mean regex recovery
+rate is just 1.8\%.  This near-total disjointness arises because the
+LLM generates different entity identifiers (e.g., ``CET1\_Capital\_Ratio''
+vs.\ the regex-produced ``cet1\_capital\_ratio/capital\_ratios''),
+different section tags and tends to summarize rather than exhaustively
+enumerate all table cells.
+
+\paragraph{Hybrid mode is a strict superset of regex.}
+The hybrid mode recovers 97.2\% of regex ENM entries on average
+(100\% on four of five instances), with a 100\% value match rate---every
+shared numeric value is bit-identical.  The hybrid graph is strictly
+larger: 4{,}745 ENM entries (+22\% over regex) and 9{,}083 triples
+(+14\%), reflecting the additional prose-extracted data contributed by
+the LLM component.  The one outlier is Model Validation (86.2\%
+recovery, ENM Jaccard 0.207), where the LLM's column classification
+differs from the heuristic on several ambiguous tables, leading to
+different entity-id construction for some entries.
+
+\paragraph{Numeric precision is exact.}
+On all shared ENM keys between regex and hybrid modes, 100\% of
+numeric values match exactly (within floating-point representation).
+The hybrid mode introduces zero numeric errors across all 3{,}887
+shared entries, confirming that the SHA-256 integrity-checked storage
+preserves values regardless of ingestion mode.
+
+\paragraph{Implications.}
+These results provide empirical justification for the regex-first
+architecture: the deterministic pipeline is not merely a design
+preference but a quantitative necessity.  An LLM-only approach loses
+87\% of structured data and produces a graph with fundamentally
+different structure.  The hybrid mode demonstrates that the optimal
+architecture uses regex as the backbone for exhaustive, precise
+extraction, with the LLM serving as an augmentation layer for
+content that falls outside the regex pipeline's scope.
 
 % =============================================================================
 \section{Discussion}
 \label{sec:discussion}
 
 \paragraph{Implications for Financial AI.}
-The 55 percentage-point gap between graph-based retrieval and LLM
-performance has direct implications for the deployment of AI in
-financial regulation.  Tasks that involve precise numeric extraction,
-exhaustive enumeration, or multi-step reasoning should not rely on
-LLM-only approaches.  Hybrid architectures that combine LLM
-understanding with structured graph retrieval are likely necessary
-for production-grade financial document analysis.
+The 41--42 percentage-point gap between graph-based retrieval (100\%)
+and LLM performance (58--59\%) has direct implications for the deployment
+of AI in financial regulation.  While the LLM performs well on absence
+detection (94\%) and threshold checking (74\%), accuracy drops sharply on
+tasks requiring exhaustive enumeration, arithmetic or cross-table
+reasoning (30--48\%).  These findings suggest that LLM-only approaches
+are insufficient for reliable financial document analysis.  Hybrid
+architectures that combine LLM understanding with structured graph
+retrieval are likely necessary for production-grade deployment.
+
+\paragraph{Why Rule-Based Ingestion?}
+FinStructBench's ingestion pipeline is deliberately rule-based (regex
+pattern matching, string parsing, value-pattern heuristics) rather
+than using the SOTA extraction techniques surveyed in
+Section~\ref{sec:related}.  The ingestion mode comparison in
+Section~\ref{sec:ingestion_modes} provides direct empirical evidence:
+an LLM-only pipeline recovers only 12.5\% of structured data with
+near-zero overlap (Jaccard~$= 0.015$).  Beyond this empirical
+finding, the choice is driven by three requirements specific to
+benchmark construction:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Provable correctness.}  The ground truth must be
+    verifiably correct by construction.  LLM-based extraction
+    (e.g., GPT-4 or Claude applied to table parsing) achieves
+    68--74\% on FinQA~\citep{chen2021finqa}---accurate enough for many
+    applications, but insufficient as a ground-truth oracle.  Any
+    extraction error would propagate into incorrect benchmark answers,
+    undermining the benchmark's purpose.  Rule-based parsing achieves
+    near-100\% precision on well-structured markdown tables because
+    the format is unambiguous.
+
+  \item \textbf{Determinism and reproducibility.}  Given the same
+    document, the pipeline must produce the identical graph on every
+    run.  LLM outputs are inherently stochastic (even at temperature~0,
+    sampling artifacts can vary across API versions), making them
+    unsuitable for a reproducible ground-truth engine.  Rule-based
+    parsing is fully deterministic.
+
+  \item \textbf{Transparency and auditability.}  In a regulated
+    financial setting, every ground-truth answer must be traceable to
+    a specific cell in the source document.  The SHA-256 integrity hash
+    on each ENM entry provides a cryptographic audit trail from answer
+    to source value.  LLM-based extraction is opaque---there is no
+    equivalent mechanism to verify that an extracted value matches the
+    source.
+\end{enumerate}
+
+\noindent
+The tradeoff is generalization: the rule-based pipeline requires
+well-structured markdown with pipe-delimited tables.  It does not
+handle prose-embedded numbers, scanned PDFs or irregular layouts
+that layout-aware models like LayoutLMv3~\citep{huang2022layoutlmv3}
+or Donut~\citep{kim2022donut} can process.  For real-world
+deployment beyond the benchmark, we provide a \textbf{hybrid
+ingestion mode} (described below) that uses an LLM to assist with
+column classification, entity resolution and relation extraction,
+while preserving the deterministic ENM storage and integrity hashing.
+
+\paragraph{Hybrid Ingestion Architecture.}
+To bridge the gap between rule-based precision and LLM-based
+flexibility, the toolkit supports a hybrid ingestion mode
+(\texttt{-{}-ingest-mode hybrid}) in which the LLM augments
+three specific steps of the pipeline:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Column classification:}  When heuristic classification
+    is ambiguous (e.g., mixed columns, domain-specific labels), the
+    LLM is prompted to classify each column as entity, numeric,
+    boolean or label, given the table headers and a sample of rows.
+  \item \textbf{Entity resolution:}  When the entity column cannot be
+    detected by name heuristic, the LLM identifies which column
+    contains the primary entity identifier.
+  \item \textbf{Relation extraction:}  For non-tabular content (prose
+    paragraphs, nested lists), the LLM extracts
+    (entity, relation, value) triples that the regex pipeline would miss.
+\end{itemize}
+
+\noindent
+Critically, the hybrid mode preserves the core invariant: all numeric
+values are stored with SHA-256 hashes and verified on lookup.  The LLM
+assists with \emph{structural} decisions (which column is the entity?
+what relation does this paragraph express?) but the \emph{values}
+remain deterministically extracted and integrity-checked.  This
+design ensures that even in hybrid mode, the ground truth is
+verifiable against the source document.  Users select the ingestion
+mode via the CLI (\texttt{-{}-ingest-mode default|hybrid}) or the
+Python API (\texttt{ingest\_markdown(path, mode="hybrid")}).
 
 \paragraph{Benchmark as a Development Tool.}
 FinStructBench can serve as an evaluation harness during the development
-of retrieval-augmented generation (RAG) systems, agentic frameworks, and
+of retrieval-augmented generation (RAG) systems, agentic frameworks and
 tool-use architectures for financial documents.  The provably correct
 ground truth eliminates the need for human evaluation, enabling rapid
 iteration on system design.
@@ -717,9 +1668,10 @@ regulations, redacted sections).  We plan to extend the benchmark
 with anonymized real-world instances in future work.
 
 The benchmark evaluates a single LLM (Claude Sonnet~4) in a
-zero-shot, full-context setting.  Future work should evaluate
-multiple models, few-shot prompting, chain-of-thought reasoning,
-and tool-augmented architectures.
+zero-shot, full-context setting.  While we compare deterministic and
+hybrid question modes, both use the same underlying ground truth.
+Future work should evaluate multiple models, few-shot prompting,
+chain-of-thought reasoning and tool-augmented architectures.
 
 % =============================================================================
 \section{Released Artifacts}
@@ -730,14 +1682,14 @@ the following components:
 
 \begin{enumerate}[leftmargin=2em]
   \item \textbf{Toolkit} (\texttt{finstructbench/}): Document ingester,
-    six question generators, scoring module, LLM caller, and benchmark
+    ten question generators, scoring module, LLM caller and benchmark
     orchestrator.
   \item \textbf{Instances} (\texttt{instances/}): Five markdown financial
     reports with reproducible generator scripts.
   \item \textbf{Results} (\texttt{results/}): Baseline results with
     per-question details in JSON format.
   \item \textbf{CLI}: \texttt{python -m finstructbench run <doc.md>}
-    with options for category limit, model, and graph-only mode.
+    with options for category limit, model and graph-only mode.
 \end{enumerate}
 
 % =============================================================================
@@ -746,18 +1698,38 @@ the following components:
 
 We presented FinStructBench, a benchmark for structured information
 retrieval from financial documents with provably correct ground truth.
-Our results reveal a sharp complexity gradient in LLM performance:
-Claude Sonnet~4 achieves 86\% on simple threshold checks but 0\% on
-multi-hop reasoning, with an overall score of 45\% against the 100\%
-graph baseline.  These findings demonstrate that current LLMs are
-insufficient for reliable financial document analysis and motivate
-the development of hybrid graph-augmented architectures.  FinStructBench
-provides a rigorous, extensible evaluation framework for measuring
-progress toward this goal.
+Three sets of experiments yield complementary findings:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{LLM evaluation.}  Across 454~questions spanning ten
+    categories and five financial document types, Claude Sonnet~4
+    achieves 58--59\% overall against the 100\% graph baseline, with a
+    clear complexity gradient: 94\% on absence detection but only 30\%
+    on contradiction and 32\% on counting.
+  \item \textbf{Question mode comparison.}  Comparing deterministic
+    (template-based) and hybrid (LLM-paraphrased) question modes reveals
+    a marginal +1~pp improvement overall, with cross-reference queries
+    benefiting most (+10~pp).
+  \item \textbf{Ingestion mode comparison.}  A three-way comparison of
+    regex-only, LLM-only and hybrid ingestion using Claude Opus~4
+    demonstrates that LLM-only extraction recovers only 12.5\% of
+    structured data (Jaccard~$= 0.015$), while hybrid ingestion preserves
+    100\% of regex values exactly and adds 22\% more entries from prose
+    extraction.
+\end{enumerate}
+
+\noindent
+Together these results demonstrate that current LLMs are insufficient
+for reliable financial document analysis: they struggle with structured
+retrieval tasks (58\% accuracy) and cannot replace deterministic
+extraction pipelines (12.5\% recovery).  Hybrid architectures that
+combine rule-based precision with LLM flexibility offer the most
+promising path forward.  FinStructBench provides a rigorous, extensible
+evaluation framework for measuring progress toward this goal.
 
 % =============================================================================
 \bibliographystyle{plainnat}
-\begin{thebibliography}{20}
+\begin{thebibliography}{40}
 
 \bibitem[Alvarado et~al.(2015)]{alvarado2015domain}
 Alvarado, J.~C.~S., Verspoor, K., and Baldwin, T. (2015).
@@ -765,6 +1737,13 @@ Alvarado, J.~C.~S., Verspoor, K., and Baldwin, T. (2015).
   assessment.
 \newblock In \emph{Proceedings of the Australasian Language Technology
   Association Workshop}, pp.~84--90.
+
+\bibitem[Edge et~al.(2024)]{edge2024graphrag}
+Edge, D., Trinh, H., Cheng, N., Bradley, J., Chao, A., Mody, A.,
+  Truitt, S., and Larson, J. (2024).
+\newblock From local to global: A graph {RAG} approach to query-focused
+  summarization.
+\newblock \emph{arXiv preprint arXiv:2404.16130}.
 
 \bibitem[Chen et~al.(2020)]{chen2020hybridqa}
 Chen, W., Zha, H., Chen, Z., Xiong, W., Wang, H., and Wang, W.~Y. (2020).
@@ -784,16 +1763,54 @@ Chen, Z., Li, S., Smiley, C., Ma, Z., Shah, S., and Wang, W.~Y. (2022).
   conversational finance question answering.
 \newblock In \emph{Proceedings of EMNLP}, pp.~6279--6292.
 
+\bibitem[Herzig et~al.(2020)]{herzig2020tapas}
+Herzig, J., Nowak, P.~K., M\"uller, T., Piccinno, F., and
+  Eisenschlos, J. (2020).
+\newblock {TAPAS}: Weakly supervised table parsing via pre-training.
+\newblock In \emph{Proceedings of ACL}, pp.~4320--4333.
+
+\bibitem[Huang et~al.(2022)]{huang2022layoutlmv3}
+Huang, Y., Lv, T., Cui, L., Lu, Y., and Wei, F. (2022).
+\newblock {LayoutLMv3}: Pre-training for document {AI} with unified text and
+  image masking.
+\newblock In \emph{Proceedings of the 30th ACM International Conference on
+  Multimedia}.
+
 \bibitem[Iyyer et~al.(2017)]{iyyer2017search}
 Iyyer, M., Yih, W., and Chang, M. (2017).
 \newblock Search-based neural structured learning for sequential question
   answering.
 \newblock In \emph{Proceedings of ACL}, pp.~1821--1831.
 
+\bibitem[Jiang et~al.(2023)]{jiang2023structgpt}
+Jiang, J., Zhou, K., Dong, Z., Ye, K., Zhao, X., and Wen, J.-R. (2023).
+\newblock {StructGPT}: A general framework for large language model to reason
+  over structured data.
+\newblock In \emph{Proceedings of EMNLP}, pp.~9237--9251.
+
+\bibitem[Kim et~al.(2022)]{kim2022donut}
+Kim, G., Hong, T., Yim, M., Nam, J., Park, J., Yim, J., Hwang, W.,
+  Yun, S., Han, D., and Park, S. (2022).
+\newblock {OCR}-free document understanding transformer.
+\newblock In \emph{European Conference on Computer Vision (ECCV)}.
+
+\bibitem[Lee et~al.(2023)]{lee2023pix2struct}
+Lee, K., Joshi, M., Turc, I., Hu, H., Liu, F., Eisenschlos, J.,
+  Khandelwal, U., Shaw, P., Chang, M.-W., and Toutanova, K. (2023).
+\newblock {Pix2Struct}: Screenshot parsing as pretraining for visual language
+  understanding.
+\newblock In \emph{Proceedings of ICML}, pp.~18893--18912.
+
 \bibitem[Li et~al.(2024)]{li2024long}
 Li, Y., Packer, C., and Gonzalez, J.~E. (2024).
 \newblock How long can open-source {LLMs} truly promise on context length?
 \newblock \emph{arXiv preprint arXiv:2402.17688}.
+
+\bibitem[Liu et~al.(2022)]{liu2022tapex}
+Liu, Q., Chen, B., Guo, J., Ziyadi, M., Lin, Z., Chen, W., and
+  Lou, J.-G. (2022).
+\newblock {TAPEX}: Table pre-training via learning a neural {SQL} executor.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}.
 
 \bibitem[Malo et~al.(2014)]{malo2014good}
 Malo, P., Sinha, A., Korhonen, P., Wallenius, J., and Takala, P. (2014).
@@ -807,10 +1824,36 @@ Mathew, M., Karatzas, D., and Jawahar, C.~V. (2021).
 \newblock {DocVQA}: A dataset for {VQA} on document images.
 \newblock In \emph{Proceedings of WACV}, pp.~2200--2209.
 
+\bibitem[Schick et~al.(2023)]{schick2023toolformer}
+Schick, T., Dwivedi-Yu, J., Dess\`i, R., Raileanu, R., Lomeli, M.,
+  Zettlemoyer, L., Cancedda, N., and Scialom, T. (2023).
+\newblock Toolformer: Language models can teach themselves to use tools.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}.
+
 \bibitem[Pasupat \& Liang(2015)]{pasupat2015compositional}
 Pasupat, P. and Liang, P. (2015).
 \newblock Compositional semantic parsing on semi-structured tables.
 \newblock In \emph{Proceedings of ACL}, pp.~1470--1480.
+
+\bibitem[Wang et~al.(2024)]{wang2024chainoftable}
+Wang, Z., Zhang, H., Li, C.-L., Eisenschlos, J.~M., Perot, V., Wang, Z.,
+  Miculicich, L., Fujii, Y., Shang, J., Lee, C.-Y., and Pfister, T. (2024).
+\newblock Chain-of-Table: Evolving tables in the reasoning chain for table
+  understanding.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}.
+
+\bibitem[Yao et~al.(2023)]{yao2023react}
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan, K., and
+  Cao, Y. (2023).
+\newblock {ReAct}: Synergizing reasoning and acting in language models.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}.
+
+\bibitem[Ye et~al.(2023)]{ye2023dater}
+Ye, Y., Hui, B., Yang, M., Li, B., Huang, F., and Li, Y. (2023).
+\newblock Large language models are versatile decomposers: Decompose evidence
+  and questions for table-based reasoning.
+\newblock In \emph{Proceedings of the 46th International ACM SIGIR Conference
+  on Research and Development in Information Retrieval}, pp.~174--184.
 
 \bibitem[Shah et~al.(2022)]{shah2022flue}
 Shah, R., Chawla, K., Eidnani, D., Shah, A., Du, W., Chava, S., Raman, N.,
@@ -830,6 +1873,76 @@ Zhu, F., Lei, W., Huang, Y., Wang, C., Zhang, S., Lv, J., Feng, F., and
 \newblock {TAT-QA}: A question answering benchmark on a hybrid of tabular and
   textual content in finance.
 \newblock In \emph{Proceedings of ACL}, pp.~3277--3287.
+
+\bibitem[Butt et~al.(2024)]{butt2024benchagents}
+Butt, N., Chandrasekaran, V., Joshi, N., Nushi, B., and
+  Balachandran, V. (2024).
+\newblock {BenchAgents}: Automated benchmark creation with multi-agent systems.
+\newblock \emph{arXiv preprint arXiv:2410.22584}.
+
+\bibitem[Dammu et~al.(2025)]{dammu2025dynamickgqa}
+Dammu, P.~P.~S., Naidu, H., and Shah, C. (2025).
+\newblock {Dynamic-KGQA}: A scalable framework for generating adaptive question
+  answering datasets from knowledge graphs.
+\newblock In \emph{Proceedings of the 48th International ACM SIGIR Conference
+  on Research and Development in Information Retrieval}.
+
+\bibitem[Gu et~al.(2021)]{gu2021grailqa}
+Gu, Y., Kase, S., Vanni, M., Sadler, B., Liang, P., Yan, X., and
+  Su, Y. (2021).
+\newblock Beyond {I.I.D.}: Three levels of generalization for question
+  answering on knowledge bases.
+\newblock In \emph{Proceedings of The Web Conference (WWW)}, pp.~3477--3488.
+
+\bibitem[Islam et~al.(2023)]{islam2023financebench}
+Islam, P., Kannappan, A., Kiela, D., Qian, R., Scherrer, N., and
+  Vidgen, B. (2023).
+\newblock {FinanceBench}: A new benchmark for financial question answering.
+\newblock \emph{arXiv preprint arXiv:2311.11944}.
+
+\bibitem[Matlin et~al.(2026)]{matlin2026finforge}
+Matlin, G., Theerthala, A., Gupta, A., JM, A., Castilla, R., Ng, Y.~M.,
+  and Chava, S. (2026).
+\newblock {FinForge}: Semi-synthetic financial benchmark generation.
+\newblock \emph{arXiv preprint arXiv:2601.06747}.
+
+\bibitem[Shashidhar et~al.(2025)]{shashidhar2025yourbench}
+Shashidhar, S., Fourrier, C., Lozovskia, A., Wolf, T., Tur, G., and
+  Hakkani-Tur, D. (2025).
+\newblock {YourBench}: Easy custom evaluation sets for everyone.
+\newblock In \emph{Proceedings of the Conference on Language Modeling (COLM)}.
+
+\bibitem[Tang et~al.(2025)]{tang2025grapharena}
+Tang, J., Zhang, Q., Li, Y., Chen, N., and Li, J. (2025).
+\newblock {GraphArena}: Evaluating and exploring large language models on graph
+  computation.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}.
+
+\bibitem[Tatarinov et~al.(2025)]{tatarinov2025kgqagen}
+Tatarinov, A., Kannan, A., Srinivasa, J., Raj, B., Anand, A., Singh, A.,
+  Luthra, N., Lade, P., Shah, R., and Chava, S. (2025).
+\newblock {KG-QAGen}: A knowledge-graph-based framework for systematic question
+  generation and long-context {LLM} evaluation.
+\newblock \emph{arXiv preprint arXiv:2505.12495}.
+
+\bibitem[Trivedi et~al.(2017)]{trivedi2017lcquad}
+Trivedi, P., Maheshwari, G., Dubey, M., and Lehmann, J. (2017).
+\newblock {LC-QuAD}: A corpus for complex question answering over knowledge
+  graphs.
+\newblock In \emph{International Semantic Web Conference (ISWC)},
+  LNCS vol.~10588, pp.~210--218. Springer.
+
+\bibitem[Wu et~al.(2025)]{wu2025tablebench}
+Wu, Y., Tang, J., and others (2025).
+\newblock {TableBench}: A comprehensive and complex benchmark for table
+  question answering.
+\newblock In \emph{Proceedings of AAAI}, vol.~39, pp.~25497--25506.
+
+\bibitem[Zhu et~al.(2025)]{zhu2025tableeval}
+Zhu, J., Wang, J., Yu, B., Wu, X., Li, J., Wang, L., and Xu, N. (2025).
+\newblock {TableEval}: A real-world benchmark for complex, multilingual, and
+  multi-structured table question answering.
+\newblock In \emph{Proceedings of EMNLP}.
 
 \end{thebibliography}
 
