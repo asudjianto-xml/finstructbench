@@ -18,7 +18,7 @@ Use FinStructBench tools whenever a user asks about:
 ## Question classification
 
 When you receive a question about a financial document, classify it into one of
-these six categories and use the corresponding tool:
+these ten categories and use the corresponding tool:
 
 | Question pattern | Category | Tool to use |
 |---|---|---|
@@ -28,6 +28,10 @@ these six categories and use the corresponding tool:
 | "How many entities have X?" | Counting | `count_entities` |
 | "Which features pass and fail?" | Contradiction | `find_contradictions` |
 | "Find the lowest X, then look up its Y" | Multi-Hop | `multi_hop_chain` |
+| "Does entity X exist in category Y?" | Absence | `query_enm` / `query_triples` |
+| "Rank entities by metric X" | Ranking | `query_enm` |
+| "Compute the ratio/difference of X and Y" | Numeric Computation | `exact_recall` + arithmetic |
+| "Sum values of X across multiple tables" | Cross-Table Aggregation | `query_enm` + aggregation |
 
 ## Workflow
 
