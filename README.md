@@ -6,21 +6,23 @@ FinStructBench evaluates how well LLMs extract, aggregate and reason over struct
 
 ## Key Results
 
-**LLM Evaluation** (454 questions, Claude Sonnet 4, deterministic mode):
+**LLM Evaluation** (454 questions, deterministic mode, 5 instances):
 
-| Category | Graph Baseline | Claude Sonnet 4 |
-|---|---|---|
-| Absence | 100% | 94% |
-| Threshold | 100% | 74% |
-| Multi-Hop | 100% | 68% |
-| Ranking | 100% | 66% |
-| Cross-Reference | 100% | 58% |
-| Exact Recall | 100% | 52% |
-| Cross-Table Agg. | 100% | 48% |
-| Numeric Comp. | 100% | 34% |
-| Counting | 100% | 32% |
-| Contradiction | 100% | 30% |
-| **Overall** | **100%** | **58%** |
+| Category | Graph Baseline | Sonnet 4 | Opus 4.6 | Opus Gain |
+|---|---|---|---|---|
+| Absence | 100% | 94% | 98% | +4pp |
+| Threshold | 100% | 74% | 88% | +14pp |
+| Cross-Reference | 100% | 58% | 76% | +18pp |
+| Ranking | 100% | 66% | 74% | +8pp |
+| Multi-Hop | 100% | 68% | 66% | -2pp |
+| Exact Recall | 100% | 52% | 54% | +2pp |
+| Numeric Comp. | 100% | 34% | 54% | +20pp |
+| Cross-Table Agg. | 100% | 48% | 48% | 0pp |
+| Counting | 100% | 32% | 38% | +6pp |
+| Contradiction | 100% | 30% | 20% | -10pp |
+| **Overall** | **100%** | **58%** | **65%** | **+7pp** |
+
+Scaling from Sonnet to Opus improves numeric computation (+20pp) and cross-reference (+18pp), but categories requiring exhaustive enumeration (counting, cross-table aggregation) or global consistency checking (contradiction) remain **scale-resistant**.
 
 **Ingestion Mode Comparison** (Claude Opus 4, 5 instances):
 

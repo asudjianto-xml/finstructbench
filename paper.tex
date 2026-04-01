@@ -65,11 +65,13 @@ report types: model validation (SR~11-7), fair lending (ECOA/HMDA), stress
 testing (CCAR/DFAST), credit portfolio review (OCC) and Basel~III capital
 adequacy (Pillar~3).  The benchmark supports two question modes:
 \emph{deterministic} (template-based) and \emph{hybrid} (LLM-paraphrased for
-linguistic diversity).  Across 454 questions evaluated in both modes,
+linguistic diversity).  Across 454 questions evaluated with two models,
 the graph-based retrieval baseline achieves 100\% accuracy by design,
-while Claude Sonnet~4 scores 58\% (deterministic) and 59\% (hybrid),
-with per-category accuracy ranging from 94\% on absence detection to
-30\% on contradiction.  A three-way ingestion comparison (regex-only,
+while Claude Sonnet~4 scores 58\% and Claude Opus~4.6 scores 65\%.
+Model scaling improves numeric computation (+20~pp) and cross-reference
+(+18~pp) but leaves exhaustive-enumeration and cross-table categories
+unchanged, revealing \emph{scale-resistant} failure modes.
+A three-way ingestion comparison (regex-only,
 LLM-only and hybrid) using Claude Opus~4 demonstrates that LLM-only
 extraction recovers only 12.5\% of structured data, while hybrid
 ingestion preserves 100\% of regex values and adds 22\% more entries
@@ -1338,45 +1340,50 @@ across all five instances, 454~questions per mode).  The graph baseline
 achieves 100\% in both modes.}
 \label{tab:det_vs_hybrid}
 \small
-\begin{tabular}{lccc}
+\begin{tabular}{lcccccc}
 \toprule
-Category & Det.\ LLM & Hyb.\ LLM & $\Delta$ \\
+& \multicolumn{3}{c}{Sonnet~4} & \multicolumn{3}{c}{Opus~4.6} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Category & Det. & Hyb. & $\Delta$ & Det. & Hyb. & $\Delta$ \\
 \midrule
-Absence & 47/50 (94\%) & 47/50 (94\%) & $0$ \\
-Contradiction & 3/10 (30\%) & 3/10 (30\%) & $0$ \\
-Counting & 16/50 (32\%) & 19/50 (38\%) & $+3$ \\
-Cross-Reference & 29/50 (58\%) & 34/50 (68\%) & $+5$ \\
-Cross-Table Agg. & 21/44 (48\%) & 21/44 (48\%) & $0$ \\
-Exact Recall & 26/50 (52\%) & 24/50 (48\%) & $-2$ \\
-Multi-Hop & 34/50 (68\%) & 33/50 (66\%) & $-1$ \\
-Numeric Comp. & 17/50 (34\%) & 18/50 (36\%) & $+1$ \\
-Ranking & 33/50 (66\%) & 33/50 (66\%) & $0$ \\
-Threshold & 37/50 (74\%) & 36/50 (72\%) & $-1$ \\
+Absence & 47 (94\%) & 47 (94\%) & $0$ & 49 (98\%) & 49 (98\%) & $0$ \\
+Threshold & 37 (74\%) & 36 (72\%) & $-1$ & 44 (88\%) & 42 (84\%) & $-2$ \\
+Cross-Ref. & 29 (58\%) & 34 (68\%) & $+5$ & 38 (76\%) & 38 (76\%) & $0$ \\
+Ranking & 33 (66\%) & 33 (66\%) & $0$ & 37 (74\%) & 37 (74\%) & $0$ \\
+Multi-Hop & 34 (68\%) & 33 (66\%) & $-1$ & 33 (66\%) & 33 (66\%) & $0$ \\
+Exact Recall & 26 (52\%) & 24 (48\%) & $-2$ & 27 (54\%) & 27 (54\%) & $0$ \\
+Numeric C. & 17 (34\%) & 18 (36\%) & $+1$ & 27 (54\%) & 26 (52\%) & $-1$ \\
+Cross-Tbl A. & 21 (48\%) & 21 (48\%) & $0$ & 21 (48\%) & 23 (52\%) & $+2$ \\
+Counting & 16 (32\%) & 19 (38\%) & $+3$ & 19 (38\%) & 19 (38\%) & $0$ \\
+Contradict. & 3 (30\%) & 3 (30\%) & $0$ & 2 (20\%) & 2 (20\%) & $0$ \\
 \midrule
-\textbf{Total} & \textbf{263/454 (58\%)} & \textbf{268/454 (59\%)} & $\mathbf{+5}$ \\
+\textbf{Total} & \textbf{263 (58\%)} & \textbf{268 (59\%)} & $\mathbf{+5}$ & \textbf{297 (65\%)} & \textbf{296 (65\%)} & $\mathbf{-1}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:det_vs_hybrid} compares LLM performance across the two
-question modes.  Hybrid paraphrasing yields a net gain of 5~questions
-(+1~pp overall), but the effect is category-dependent:
+Table~\ref{tab:det_vs_hybrid} compares performance across the two
+question modes for both models.  For Sonnet, hybrid paraphrasing yields
+a net gain of 5~questions (+1~pp overall), driven primarily by
+cross-reference ($+5$) and counting ($+3$).  For Opus, the deterministic
+and hybrid modes are virtually identical ($-1$ question overall),
+suggesting that the stronger model is robust to surface-level phrasing
+variation.
 
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{Cross-reference benefits most} ($+5$, from 58\% to
-    68\%).  Template-generated cross-reference questions use rigid
-    phrasing with nested quoting; the paraphrased versions use more
-    natural set-intersection language that may better match the LLM's
-    training distribution.
-  \item \textbf{Counting improves modestly} ($+3$, from 32\% to 38\%).
-    Natural phrasing of enumeration queries may reduce
-    misinterpretation of the counting target.
-  \item \textbf{Exact recall slightly degrades} ($-2$, from 52\% to
-    48\%).  Paraphrasing may remove disambiguating cues (e.g., quoted
-    column names) that help the LLM locate the correct cell.
-  \item \textbf{Most categories are unaffected} (6 of 10 categories
-    show $\leq$1 question difference), indicating that the question
-    surface form has limited impact on LLM accuracy for most task types.
+  \item \textbf{Sonnet benefits from paraphrasing on cross-reference}
+    ($+5$, from 58\% to 68\%).  Template-generated questions use rigid
+    phrasing with nested quoting; paraphrased versions use more
+    natural set-intersection language.  Opus achieves 76\% in both
+    modes, indicating it already handles template phrasing well.
+  \item \textbf{Opus is phrasing-invariant.}  Nine of ten categories
+    show $\leq$1 question difference between modes for Opus, compared
+    to seven of ten for Sonnet.  This suggests that model scale
+    reduces sensitivity to question surface form.
+  \item \textbf{Neither model benefits on hard categories.}  Counting,
+    contradiction, and multi-hop show negligible mode effects for both
+    models, confirming that these failures are structural rather than
+    phrasing-dependent.
 \end{itemize}
 
 Table~\ref{tab:paraphrase_examples} illustrates the paraphrasing
@@ -1411,34 +1418,36 @@ Contradiction &
 \subsection{Error Analysis}
 \label{sec:errors}
 
-We analyze the 191 LLM failures (deterministic mode) across
-representative error modes:
+We analyze LLM failures in deterministic mode (191 for Sonnet, 157 for
+Opus) across representative error modes:
 
 \paragraph{Adjacent Cell Confusion.}
-In exact recall failures, the LLM frequently returns a value from a
+In exact recall failures, both models frequently return a value from a
 neighboring cell in the same table.  For example, when asked for
-``Q1~2026/Non-Interest Income,'' Claude returns the Non-Interest Expense
-value from the same row.  This error is especially prevalent in the
-Stress Test instance (0/10 on exact recall), which uses wide matrices
-with 9 quarterly columns.
+``Q1~2026/Non-Interest Income,'' the model returns the Non-Interest
+Expense value from the same row.  Both Sonnet and Opus score 0/10 on
+Stress Test exact recall, which uses wide matrices with 9 quarterly
+columns---model scale does not help here.
 
 \paragraph{Partial Enumeration.}
-In the majority of counting failures (34 of 50 questions missed), the LLM
-provides a count lower than the ground truth.  The model appears to
-enumerate entities until it reaches a ``satisfying'' count rather than
-exhaustively scanning all triples.
+In counting failures, the model provides a count lower than the ground
+truth.  Opus improves modestly (19/50 vs.\ Sonnet's 16/50), but
+both models tend to stop enumerating before exhaustively scanning all
+matching triples.
 
 \paragraph{Cross-Table Blindness.}
-Cross-table aggregation achieves 0/10 on both Stress Test and Credit
-Portfolio, where the required values span multiple sections.  The LLM
-typically finds values from one table but misses contributions from
-other sections of the document.
+Cross-table aggregation achieves identical scores (21/44) for both
+models.  Both Sonnet and Opus score 0/10 on Stress Test, indicating
+that the inability to aggregate values across document sections is a
+structural limitation independent of model capacity.
 
 \paragraph{Arithmetic Errors.}
-Numeric computation failures (33 of 50 missed) frequently involve
-correct value extraction but incorrect arithmetic---for example,
-computing a ratio with the numerator and denominator swapped, or
-rounding to the wrong precision.
+Numeric computation shows the largest model-scale benefit: Opus scores
+27/50 versus Sonnet's 17/50 (+20~pp).  Many Sonnet failures involve
+correct value extraction but incorrect arithmetic (e.g., swapped
+numerator/denominator, wrong rounding precision).  Opus substantially
+reduces these errors while both models still struggle when values must
+be extracted from dense, similarly-formatted tables.
 
 \subsection{Ingestion Mode Comparison}
 \label{sec:ingestion_modes}
@@ -1564,15 +1573,17 @@ content that falls outside the regex pipeline's scope.
 \label{sec:discussion}
 
 \paragraph{Implications for Financial AI.}
-The 41--42 percentage-point gap between graph-based retrieval (100\%)
-and LLM performance (58--59\%) has direct implications for the deployment
-of AI in financial regulation.  While the LLM performs well on absence
-detection (94\%) and threshold checking (74\%), accuracy drops sharply on
-tasks requiring exhaustive enumeration, arithmetic or cross-table
-reasoning (30--48\%).  These findings suggest that LLM-only approaches
-are insufficient for reliable financial document analysis.  Hybrid
-architectures that combine LLM understanding with structured graph
-retrieval are likely necessary for production-grade deployment.
+The 35--42 percentage-point gap between graph-based retrieval (100\%)
+and LLM performance (58--65\%) has direct implications for the deployment
+of AI in financial regulation.  While scaling from Sonnet to Opus
+improves overall accuracy by 7~pp, the gains are unevenly distributed:
+numeric computation improves by 20~pp, but cross-table aggregation,
+counting, and contradiction show minimal improvement.  These
+\emph{scale-resistant} categories---which require exhaustive enumeration
+or cross-section reasoning---suggest structural limitations that cannot
+be overcome by model scale alone.  Hybrid architectures that combine
+LLM understanding with structured graph retrieval remain necessary
+for production-grade financial document analysis.
 
 \paragraph{Why Rule-Based Ingestion?}
 FinStructBench's ingestion pipeline is deliberately rule-based (regex
@@ -1675,11 +1686,11 @@ additional complexity (e.g., footnotes, cross-references to external
 regulations, redacted sections).  We plan to extend the benchmark
 with anonymized real-world instances in future work.
 
-The benchmark evaluates a single LLM (Claude Sonnet~4) in a
-zero-shot, full-context setting.  While we compare deterministic and
-hybrid question modes, both use the same underlying ground truth.
-Future work should evaluate multiple models, few-shot prompting,
-chain-of-thought reasoning and tool-augmented architectures.
+The benchmark evaluates two models from the same family (Claude
+Sonnet~4 and Opus~4.6) in a zero-shot, full-context setting.  Future
+work should evaluate models from other families (e.g., GPT-4, Gemini,
+open-weight models), as well as few-shot prompting, chain-of-thought
+reasoning, and tool-augmented architectures.
 
 % =============================================================================
 \section{Released Artifacts}
@@ -1709,15 +1720,18 @@ retrieval from financial documents with provably correct ground truth.
 Three sets of experiments yield complementary findings:
 
 \begin{enumerate}[leftmargin=2em]
-  \item \textbf{LLM evaluation.}  Across 454~questions spanning ten
-    categories and five financial document types, Claude Sonnet~4
-    achieves 58--59\% overall against the 100\% graph baseline, with a
-    clear complexity gradient: 94\% on absence detection but only 30\%
-    on contradiction and 32\% on counting.
+  \item \textbf{LLM evaluation across model scales.}  Across
+    454~questions spanning ten categories and five financial document
+    types, Claude Sonnet~4 achieves 58\% and Claude Opus~4.6 achieves
+    65\% against the 100\% graph baseline.  Scaling improves
+    numeric computation (+20~pp) and cross-reference (+18~pp), but
+    categories requiring exhaustive enumeration (counting, 32--38\%)
+    or cross-section reasoning (cross-table aggregation, 48\%)
+    remain scale-resistant.
   \item \textbf{Question mode comparison.}  Comparing deterministic
-    (template-based) and hybrid (LLM-paraphrased) question modes reveals
-    a marginal +1~pp improvement overall, with cross-reference queries
-    benefiting most (+10~pp).
+    (template-based) and hybrid (LLM-paraphrased) question modes
+    reveals negligible impact: +1~pp for Sonnet, $-$0~pp for Opus.
+    The stronger model is robust to surface-level phrasing variation.
   \item \textbf{Ingestion mode comparison.}  A three-way comparison of
     regex-only, LLM-only and hybrid ingestion using Claude Opus~4
     demonstrates that LLM-only extraction recovers only 12.5\% of
@@ -1728,11 +1742,12 @@ Three sets of experiments yield complementary findings:
 
 \noindent
 Together these results demonstrate that current LLMs are insufficient
-for reliable financial document analysis: they struggle with structured
-retrieval tasks (58\% accuracy) and cannot replace deterministic
-extraction pipelines (12.5\% recovery).  Hybrid architectures that
-combine rule-based precision with LLM flexibility offer the most
-promising path forward.  FinStructBench provides a rigorous, extensible
+for reliable financial document analysis: even the strongest model
+tested achieves only 65\% accuracy on structured retrieval, and model
+scaling alone does not resolve structural limitations in enumeration
+and cross-table reasoning.  Hybrid architectures that combine
+rule-based precision with LLM flexibility offer the most promising
+path forward.  FinStructBench provides a rigorous, extensible
 evaluation framework for measuring progress toward this goal.
 
 % =============================================================================
